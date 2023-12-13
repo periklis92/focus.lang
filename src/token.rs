@@ -94,11 +94,9 @@ token_types!(
     LessEqual "<=",
     Greater ">",
     GreaterEqual ">=",
-    Not "!",
     NotEqual "!=",
-    And "&&",
-    Or "||",
     ThinArrow "->",
+    Pipe "|>",
     LBracket "[",
     RBracket "]",
     LParen "(",
@@ -112,8 +110,16 @@ token_types!(
     Unknown "<unknown>",
     True "true" reserved,
     False "false" reserved,
-    Local "local" reserved,
+    Let "let" reserved,
     Function "fn" reserved,
+    And "and" reserved,
+    Not "not" reserved,
+    Or "or" reserved,
+    Is "is" reserved,
+    Match "match" reserved,
+    If "if" reserved,
+    Then "then" reserved,
+    Else "else" reserved,
 );
 
 impl TokenType {
@@ -132,6 +138,7 @@ impl TokenType {
                 | TokenType::LCurly
                 | TokenType::LBracket
                 | TokenType::Function
+                | TokenType::If
         )
     }
 }

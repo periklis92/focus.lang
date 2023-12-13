@@ -1,9 +1,7 @@
-use std::collections::BTreeMap;
-
 use crate::{
     ast::{
         ArithmeticOperator, BinaryOperator, BooleanOperator, ComparisonOperator, Expression,
-        Literal, Operation, PathPart, UnaryOperation,
+        Literal, Operation, PathPart, Statement, TableEntry, UnaryOperation,
     },
     lexer::Lexer,
     token::{Token, TokenType},
@@ -12,12 +10,44 @@ use crate::{
 #[derive(Clone)]
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
+    last_expr_start_position: usize,
 }
 
 impl<'a> Parser<'a> {
     pub fn new(source: &'a str) -> Self {
         Self {
             lexer: Lexer::new(source),
+            last_expr_start_position: 0,
+        }
+    }
+
+    pub fn lexer(&self) -> &Lexer<'a> {
+        &self.lexer
+    }
+
+    pub fn current_position(&self) -> usize {
+        self.lexer.position()
+    }
+
+    pub fn current_position_in_line(&self) -> usize {
+        self.current_position() - self.last_expr_start_position
+    }
+
+    pub fn get_last_expr_source(&self) -> &str {
+        self.lexer
+            .slice(self.last_expr_start_position..self.current_position())
+    }
+
+    pub fn get_last_expr_line(&self) -> &str {
+        let source = self.lexer.source();
+        let position = &source
+            .chars()
+            .skip(self.last_expr_start_position)
+            .position(|c| c == '\n');
+        if let Some(position) = position {
+            &source[self.last_expr_start_position..self.last_expr_start_position + *position]
+        } else {
+            &source[self.last_expr_start_position..]
         }
     }
 
@@ -27,227 +57,39 @@ impl<'a> Parser<'a> {
             .ok_or(ParserError::UnexpectedToken(token_type, self.lexer.peek()))
     }
 
-    pub fn parse(&mut self) -> Result<Expression, ParserError> {
+    fn expect_indented(&mut self, token_type: TokenType) -> Result<Token, ParserError> {
+        self.lexer
+            .next_checked_indented(token_type.clone())
+            .ok_or(ParserError::UnexpectedToken(
+                token_type,
+                self.lexer.peek_indented().unwrap_or(TokenType::Unknown),
+            ))
+    }
+
+    pub fn parse(&mut self) -> Result<Statement, ParserError> {
+        let statement = self.statement()?;
+        self.expect(TokenType::NewLine)?;
+        Ok(statement)
+    }
+
+    fn statement(&mut self) -> Result<Statement, ParserError> {
         self.lexer.skip_new_lines();
         let token = self.lexer.peek();
+        self.last_expr_start_position = self.lexer.position();
         match token {
+            TokenType::Let => self.r#let(),
+            TokenType::Function => self.function_statement(),
             TokenType::Eos => Err(ParserError::EndOfSource),
             TokenType::Unknown => Err(ParserError::UnknownToken),
-            TokenType::Local => self.parse_assignment(),
-            TokenType::Function => self.parse_function(),
-            t if t.is_primary() => self.parse_operation(),
-            t => Err(ParserError::UnexpectedTokenOneOf(
-                vec![TokenType::Local, TokenType::Function],
-                t,
-            )),
+            _ => Ok(Statement::Expression(self.expression()?)),
         }
     }
 
-    fn parse_table(&mut self) -> Result<Expression, ParserError> {
-        self.expect(TokenType::LCurly)?;
-        let mut map = BTreeMap::new();
-        self.lexer.skip_new_lines();
-        while self.lexer.peek() != TokenType::RBracket && self.lexer.peek() != TokenType::Eos {
-            let key = self.parse_path_part()?;
-            self.expect(TokenType::Colon)?;
-            self.lexer.skip_new_lines();
-            let value = self.parse()?;
-            map.insert(key, value);
-            if self.lexer.next_checked(TokenType::Comma).is_none() {
-                self.lexer.skip_new_lines();
-                self.expect(TokenType::RCurly)?;
-                break;
-            }
-            self.lexer.skip_new_lines();
-        }
-        Ok(Expression::Table(map))
-    }
-
-    fn parse_assignment(&mut self) -> Result<Expression, ParserError> {
-        self.expect(TokenType::Local)?;
-        let ident_token = self.expect(TokenType::Ident)?;
-        let ident = self.lexer.slice(ident_token.span).to_string();
-        let value = if self.lexer.next_checked(TokenType::Assign).is_none() {
-            None
-        } else {
-            Some(self.parse_block_or_expr()?.into())
-        };
-        Ok(Expression::Local { ident, value })
-    }
-
-    fn parse_block_or_expr(&mut self) -> Result<Expression, ParserError> {
-        let expr = if self.lexer.peek() == TokenType::NewLine {
-            let start_indentation = self.lexer.indentation();
-            self.lexer.next(); // Skip new line
-            self.parse_block(start_indentation)?
-        } else {
-            self.parse()?
-        };
-
-        match expr {
-            Expression::Block(mut v) if v.len() == 1 => Ok(v.swap_remove(0)),
-            _ => Ok(expr),
-        }
-    }
-
-    fn parse_block(&mut self, indentation: usize) -> Result<Expression, ParserError> {
-        let mut block = Vec::new();
-        while self.lexer.peek_indentation() > indentation {
-            block.push(self.parse()?);
-        }
-
-        if block.is_empty() {
-            Err(ParserError::ExpectedBlock)
-        } else {
-            Ok(Expression::Block(block))
-        }
-    }
-
-    fn parse_primary(&mut self) -> Result<Expression, ParserError> {
-        match self.lexer.peek() {
-            TokenType::Unit => {
-                self.lexer.next();
-                Ok(Expression::Literal(Literal::Unit))
-            }
-            TokenType::Minus => {
-                self.lexer.next();
-                Ok(Expression::UnaryOperation {
-                    operand: self.parse_primary()?.into(),
-                    operation: UnaryOperation::Negate,
-                })
-            }
-            TokenType::Not => {
-                self.lexer.next();
-                Ok(Expression::UnaryOperation {
-                    operand: self.parse_primary()?.into(),
-                    operation: UnaryOperation::Not,
-                })
-            }
-            TokenType::Number => {
-                let token = self.lexer.next();
-                let mut num = self.lexer.slice(token.span).to_string();
-                if num.contains('.') {
-                    if num.ends_with('.') {
-                        num.push('0');
-                    }
-                    num.parse::<f64>()
-                        .map(|n| Expression::Literal(Literal::Number(n)))
-                        .map_err(|e| ParserError::UnableToParseNumber(e))
-                } else {
-                    num.parse::<i64>()
-                        .map(|n| Expression::Literal(Literal::Integer(n)))
-                        .map_err(|e| ParserError::UnableToParseInt(e))
-                }
-            }
-            TokenType::Ident => {
-                let token = self.lexer.next();
-                let ident = self.lexer.slice(token.span);
-                let path = self.parse_path(Expression::Ident(ident.to_string()))?;
-                if self
-                    .lexer
-                    .peek_indented()
-                    .is_some_and(|t| t.is_primary() && t != TokenType::Minus)
-                {
-                    self.parse_call(path)
-                } else {
-                    Ok(path)
-                }
-            }
-            TokenType::Function => {
-                self.lexer.next();
-                self.parse_function_with_ident(None)
-            }
-            TokenType::LBracket => {
-                self.lexer.next();
-                self.lexer.skip_new_lines();
-                let mut arr = Vec::new();
-                while self.lexer.peek() != TokenType::RBracket
-                    && self.lexer.peek() != TokenType::Eos
-                {
-                    let expr = self.parse_primary()?;
-                    arr.push(expr);
-                    self.lexer.next_checked(TokenType::Comma);
-                }
-                self.expect(TokenType::RBracket)?;
-                Ok(Expression::Array(arr))
-            }
-            TokenType::LCurly => self.parse_table(),
-            TokenType::DoubleQuote => {
-                Ok(Expression::Literal(Literal::String(self.parse_string()?)))
-            }
-            _ => Err(ParserError::NotAPrimaryExpression),
-        }
-    }
-
-    fn parse_integer(&mut self) -> Result<i64, ParserError> {
-        let token = self.expect(TokenType::Number)?;
-        let mut num = self.lexer.slice(token.span).to_string();
-        num.parse::<i64>()
-            .map_err(|e| ParserError::UnableToParseInt(e))
-    }
-
-    fn parse_float(&mut self) -> Result<f64, ParserError> {
-        let token = self.expect(TokenType::Number)?;
-        let mut num = self.lexer.slice(token.span).to_string();
-        self.expect(TokenType::Dot)?;
-        num.push('.');
-        if self.lexer.peek_empty() == TokenType::Number {
-            let token = self.lexer.next_empty();
-            let n = self.lexer.slice(token.span);
-            num.push_str(n);
-        } else {
-            num.push('0');
-        }
-        num.parse::<f64>()
-            .map_err(|e| ParserError::UnableToParseNumber(e))
-    }
-
-    fn parse_function(&mut self) -> Result<Expression, ParserError> {
-        self.expect(TokenType::Function)?;
-        let token = self.expect(TokenType::Ident)?;
-        let ident = self.lexer.slice(token.span).to_string();
-        self.parse_function_with_ident(Some(ident))
-    }
-
-    fn parse_function_with_ident(
-        &mut self,
-        ident: Option<String>,
-    ) -> Result<Expression, ParserError> {
-        let mut args = Vec::new();
-        while self
-            .lexer
-            .peek_indented()
-            .is_some_and(|t| t != TokenType::ThinArrow)
-        {
-            let token = self.expect(TokenType::Ident)?;
-            let ident = self.lexer.slice(token.span).to_string();
-            args.push(ident);
-        }
-        self.lexer.next(); // Consume thin arrow
-        let expr = self.parse_block_or_expr()?.into();
-        Ok(Expression::Function { ident, args, expr })
-    }
-
-    fn parse_call(&mut self, path: Expression) -> Result<Expression, ParserError> {
-        let mut args = Vec::new();
-
-        while self.lexer.peek_indented().is_some_and(|t| t.is_primary()) {
-            self.lexer.skip_new_lines();
-            let arg = self.parse_primary()?;
-            args.push(arg);
-        }
-
-        Ok(Expression::Call {
-            path: path.into(),
-            args,
-        })
-    }
-
-    fn parse_operation(&mut self) -> Result<Expression, ParserError> {
-        let mut lhs = self.parse_primary()?;
+    fn expression(&mut self) -> Result<Expression, ParserError> {
+        let mut lhs = self.primary()?;
         let mut previous_precedence = 0;
         loop {
-            let operation = match self.parse_operator() {
+            let operation = match self.operator() {
                 Some(op) => op,
                 None => return Ok(lhs),
             };
@@ -267,14 +109,14 @@ impl<'a> Parser<'a> {
             }
 
             let mut p = self.clone();
-            p.parse_primary()?;
-            let next_operator = p.parse_operator();
+            p.primary()?;
+            let next_operator = p.operator();
 
             let rhs = if next_operator.is_some_and(|op| op.precedence() > current_precedence) {
                 previous_precedence += 1;
-                self.parse_operation()?
+                self.expression()?
             } else {
-                self.parse_primary()?
+                self.primary()?
             };
 
             lhs = Expression::Operation {
@@ -285,9 +127,306 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_operator(&mut self) -> Option<Operation> {
-        let token = self.lexer.peek_indented()?;
+    fn primary(&mut self) -> Result<Expression, ParserError> {
+        match self.lexer.peek() {
+            TokenType::Unit => {
+                self.lexer.next();
+                Ok(Expression::Literal(Literal::Unit))
+            }
+            TokenType::Minus => {
+                self.lexer.next();
+                Ok(Expression::UnaryOperation {
+                    operand: self.primary()?.into(),
+                    operation: UnaryOperation::Negate,
+                })
+            }
+            TokenType::Not => {
+                self.lexer.next();
+                Ok(Expression::UnaryOperation {
+                    operand: self.primary()?.into(),
+                    operation: UnaryOperation::Not,
+                })
+            }
+            TokenType::Number => {
+                let token = self.lexer.next();
+                let mut num = self.lexer.slice(token.span).to_string();
+                if num.contains('.') {
+                    if num.ends_with('.') {
+                        num.push('0');
+                    }
+                    num.parse::<f64>()
+                        .map(|n| Expression::Literal(Literal::Number(n)))
+                        .map_err(|e| ParserError::UnableToParseNumber(e))
+                } else {
+                    num.parse::<i64>()
+                        .map(|n| Expression::Literal(Literal::Integer(n)))
+                        .map_err(|e| ParserError::UnableToParseInt(e))
+                }
+            }
+            TokenType::Function => self.function_expression(),
+            TokenType::Ident => {
+                if self.is_call()? {
+                    self.call()
+                } else {
+                    self.path()
+                }
+            }
+            TokenType::LParen => {
+                let expr = if self.is_call()? {
+                    self.lexer.next();
+                    self.call()?
+                } else {
+                    self.lexer.next();
+                    self.lexer.skip_new_lines();
+                    self.expression()?
+                };
+                self.expect(TokenType::RParen)?;
+                Ok(expr)
+            }
+            TokenType::LBracket => {
+                self.lexer.next();
+                self.lexer.skip_new_lines();
+                let mut arr = Vec::new();
+                while self.lexer.peek() != TokenType::RBracket
+                    && self.lexer.peek() != TokenType::Eos
+                {
+                    let expr = self.primary()?;
+                    arr.push(expr);
+                    self.lexer.next_checked(TokenType::Comma);
+                }
+                self.expect(TokenType::RBracket)?;
+                Ok(Expression::Array(arr))
+            }
+            TokenType::LCurly => self.table(),
+            TokenType::DoubleQuote => Ok(Expression::Literal(Literal::String(self.string()?))),
+            TokenType::True => {
+                self.lexer.next();
+                Ok(Expression::Literal(Literal::Bool(true)))
+            }
+            TokenType::False => {
+                self.lexer.next();
+                Ok(Expression::Literal(Literal::Bool(false)))
+            }
+            TokenType::If => {
+                self.lexer.next();
+                self.r#if()
+            }
+            _ => Err(ParserError::NotAPrimaryExpression),
+        }
+    }
 
+    fn table(&mut self) -> Result<Expression, ParserError> {
+        self.expect(TokenType::LCurly)?;
+        let mut table = Vec::new();
+        self.lexer.skip_new_lines();
+        while self.lexer.peek() != TokenType::RCurly && self.lexer.peek() != TokenType::Eos {
+            let key = match self.lexer.peek() {
+                TokenType::LBracket => {
+                    self.lexer.next();
+                    let expr = self.expression()?;
+                    self.expect(TokenType::RBracket)?;
+                    expr
+                }
+                TokenType::Ident => {
+                    let token = self.lexer.next();
+                    Expression::Literal(Literal::String(self.lexer.slice(token.span).to_string()))
+                }
+                TokenType::DoubleQuote => Expression::Literal(Literal::String(self.string()?)),
+                token => {
+                    return Err(ParserError::UnexpectedTokenOneOf(
+                        vec![TokenType::DoubleQuote, TokenType::Ident],
+                        token,
+                    ))
+                }
+            };
+            self.expect(TokenType::Colon)?;
+            self.lexer.skip_new_lines();
+            let value = self.expression()?;
+            table.push(TableEntry { key, value });
+            self.lexer.skip_new_lines();
+            if self.lexer.next_checked(TokenType::Comma).is_none() {
+                break;
+            }
+        }
+        self.expect(TokenType::RCurly)?;
+        Ok(Expression::Table(table))
+    }
+
+    fn r#let(&mut self) -> Result<Statement, ParserError> {
+        self.expect(TokenType::Let)?;
+        let token = self.expect(TokenType::Ident)?;
+        let ident = self.lexer.slice(token.span).to_string();
+        let value = if self.lexer.next_checked(TokenType::Assign).is_none() {
+            None
+        } else {
+            Some(self.expression()?)
+        };
+        Ok(Statement::Let { ident, value })
+    }
+
+    fn block(&mut self) -> Result<Expression, ParserError> {
+        let statements = if self.lexer.peek() == TokenType::NewLine {
+            let start_indentation = self.lexer.indentation();
+            self.lexer.next(); // Skip new line
+
+            self.block_with_indentation(start_indentation)?
+        } else {
+            vec![self.statement()?]
+        };
+
+        match statements.last() {
+            Some(Statement::Let { .. } | Statement::Function { .. }) => {
+                Err(ParserError::FoundStatementWhereExpressionWasExpected)
+            }
+            _ => Ok(Expression::Block(statements)),
+        }
+    }
+
+    fn block_with_indentation(
+        &mut self,
+        indentation: usize,
+    ) -> Result<Vec<Statement>, ParserError> {
+        let mut block = Vec::new();
+        while self.lexer.peek_indentation() > indentation {
+            block.push(self.statement()?);
+        }
+
+        if block.is_empty() {
+            Err(ParserError::ExpectedBlock)
+        } else {
+            Ok(block)
+        }
+    }
+
+    fn is_call(&self) -> Result<bool, ParserError> {
+        let mut cloned = self.clone();
+        match cloned.lexer.peek() {
+            TokenType::Ident => {
+                cloned.path()?;
+                Ok(cloned
+                    .lexer
+                    .next_indented()
+                    .is_some_and(|t| t.token_type.is_primary() && t.token_type != TokenType::Minus))
+            }
+            TokenType::LParen => {
+                cloned.lexer.next();
+                cloned.expression()?;
+                cloned.expect(TokenType::RParen)?;
+                Ok(cloned
+                    .lexer
+                    .next_indented()
+                    .is_some_and(|t| t.token_type.is_primary()))
+            }
+            _ => Ok(false),
+        }
+    }
+
+    fn r#if(&mut self) -> Result<Expression, ParserError> {
+        let if_indentation = self.lexer.indentation();
+        let condition = self.expression()?.into();
+        self.expect(TokenType::Then)?;
+        let block = self.block()?.into();
+
+        let r#else = if self
+            .lexer
+            .next_checked_continued(TokenType::Else, if_indentation)
+            .is_some()
+        {
+            if self.lexer.next_checked(TokenType::If).is_some() {
+                Some(self.r#if()?.into())
+            } else {
+                Some(self.block()?.into())
+            }
+        } else {
+            None
+        };
+
+        Ok(Expression::If {
+            condition,
+            block,
+            r#else,
+        })
+    }
+
+    fn function_statement(&mut self) -> Result<Statement, ParserError> {
+        self.expect(TokenType::Function)?;
+        let token = self.expect(TokenType::Ident)?;
+        let ident = self.lexer().slice(token.span).to_string();
+        let args = self.function_args()?;
+        self.expect(TokenType::ThinArrow)?;
+        let expr = self.block()?.into();
+        Ok(Statement::Function { ident, args, expr })
+    }
+
+    fn function_expression(&mut self) -> Result<Expression, ParserError> {
+        self.expect(TokenType::Function)?;
+        let args = self.function_args()?;
+        self.expect(TokenType::ThinArrow)?;
+        let expr = self.block()?.into();
+        Ok(Expression::Function { args, expr })
+    }
+
+    fn function_args(&mut self) -> Result<Vec<String>, ParserError> {
+        let mut args = Vec::new();
+        while self
+            .lexer
+            .peek_indented()
+            .is_some_and(|t| t != TokenType::ThinArrow)
+        {
+            let token = self.expect_indented(TokenType::Ident)?;
+            let ident = self.lexer.slice(token.span).to_string();
+            args.push(ident);
+        }
+        Ok(args)
+    }
+
+    fn callee(&mut self) -> Result<Expression, ParserError> {
+        match self.lexer.peek() {
+            TokenType::Ident => self.path(),
+            TokenType::LParen => self.primary(),
+            t => Err(ParserError::UnexpectedTokenOneOf(
+                [TokenType::Ident, TokenType::LParen].to_vec(),
+                t,
+            )),
+        }
+    }
+
+    fn call(&mut self) -> Result<Expression, ParserError> {
+        let indentation = self.lexer.indentation();
+        let mut call = self.call_simple()?;
+
+        while self
+            .lexer
+            .next_checked_continued(TokenType::Pipe, indentation)
+            .is_some()
+        {
+            match self.call_simple()? {
+                Expression::Call { callee, mut args } => {
+                    args.insert(0, call);
+                    call = Expression::Call { callee, args }
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        Ok(call)
+    }
+
+    fn call_simple(&mut self) -> Result<Expression, ParserError> {
+        let callee = self.callee()?.into();
+        let mut args = Vec::new();
+
+        while self.lexer.peek_indented().is_some_and(|t| t.is_primary()) {
+            self.lexer.skip_new_lines();
+            let arg = self.primary()?;
+            args.push(arg);
+        }
+
+        Ok(Expression::Call { callee, args })
+    }
+
+    fn operator(&mut self) -> Option<Operation> {
+        let token = self.lexer.peek_indented()?;
         match token {
             TokenType::Plus => Some(Operation::Arithmetic(ArithmeticOperator::Add)),
             TokenType::Minus => Some(Operation::Arithmetic(ArithmeticOperator::Subtract)),
@@ -316,7 +455,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_string(&mut self) -> Result<String, ParserError> {
+    fn string(&mut self) -> Result<String, ParserError> {
         self.expect(TokenType::DoubleQuote)?;
         let start_position = self.lexer.position();
         while self.lexer.peek() != TokenType::DoubleQuote && self.lexer.peek() != TokenType::Eos {
@@ -330,48 +469,34 @@ impl<'a> Parser<'a> {
         Ok(str.to_string())
     }
 
-    fn parse_path(&mut self, expr: Expression) -> Result<Expression, ParserError> {
+    fn path(&mut self) -> Result<Expression, ParserError> {
+        let token = self.expect(TokenType::Ident)?;
+        let ident = self.lexer.slice(token.span).to_string();
         let mut path_parts = Vec::new();
         loop {
             match self.lexer.peek_empty() {
                 TokenType::LBracket => {
                     self.lexer.next_empty();
-                    if self.lexer.peek_empty() == TokenType::Empty {
-                        return Err(ParserError::InvalidEmptySpace);
-                    }
-                    path_parts.push(self.parse_path_part()?);
+                    let expr = self.primary()?;
                     self.expect(TokenType::RBracket)?;
+                    path_parts.push(PathPart::Index(expr));
                 }
                 TokenType::Dot => {
-                    let nxt = self.lexer.next_empty();
+                    self.lexer.next_empty();
                     if self.lexer.peek_empty() == TokenType::Empty {
                         return Err(ParserError::InvalidEmptySpace);
                     }
-                    path_parts.push(self.parse_path_part()?)
+                    let token = self.expect(TokenType::Ident)?;
+                    let ident = self.lexer.slice(token.span);
+                    path_parts.push(PathPart::Ident(ident.to_string()));
                 }
                 _ => break,
             }
         }
         Ok(Expression::Path {
-            expr: expr.into(),
+            ident,
             parts: path_parts,
         })
-    }
-
-    fn parse_path_part(&mut self) -> Result<PathPart, ParserError> {
-        match self.lexer.peek() {
-            TokenType::DoubleQuote => Ok(PathPart::String(self.parse_string()?)),
-            TokenType::Ident => {
-                let token = self.lexer.next();
-                let ident = self.lexer.slice(token.span).to_string();
-                Ok(PathPart::Ident(ident))
-            }
-            TokenType::Number => Ok(PathPart::Number(self.parse_integer()?)),
-            _ => Err(ParserError::UnexpectedTokenOneOf(
-                vec![TokenType::LBracket, TokenType::Ident, TokenType::Number],
-                self.lexer.next().token_type,
-            )),
-        }
     }
 }
 
@@ -390,22 +515,24 @@ pub enum ParserError {
     UnexpectedTokenOneOf(Vec<TokenType>, TokenType),
     EarlyEos,
     InvalidEmptySpace,
+    UnexpectedExpression(String),
+    FoundStatementWhereExpressionWasExpected,
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
-    use crate::ast::{ArithmeticOperator, Expression, Literal, Operation, PathPart};
+    use crate::ast::{
+        ArithmeticOperator, Expression, Literal, Operation, PathPart, Statement, TableEntry,
+    };
 
     use super::Parser;
 
     #[test]
     fn local_assignment() {
-        let mut parser = Parser::new("local a");
+        let mut parser = Parser::new("let a");
         assert_eq!(
             parser.parse().expect("Unable to parse expression."),
-            Expression::Local {
+            Statement::Let {
                 ident: "a".to_string(),
                 value: None
             }
@@ -417,9 +544,9 @@ mod tests {
         let mut parser = Parser::new("a = 1 + 1");
         assert_eq!(
             parser.parse().expect("Unable to parse expression."),
-            Expression::Operation {
+            Statement::Expression(Expression::Operation {
                 lhs: Expression::Path {
-                    expr: Expression::Ident("a".to_string()).into(),
+                    ident: "a".to_string(),
                     parts: vec![]
                 }
                 .into(),
@@ -430,7 +557,7 @@ mod tests {
                     rhs: Expression::Literal(Literal::Integer(1)).into()
                 }
                 .into()
-            }
+            })
         );
     }
 
@@ -439,34 +566,33 @@ mod tests {
         let mut parser = Parser::new(
             r#"
             a = fn ->
-                local a = 2
+                let a = 2
                 3
             2
             "#,
         );
         assert_eq!(
             parser.parse().expect("Unable to parse expression."),
-            Expression::Operation {
+            Statement::Expression(Expression::Operation {
                 lhs: Expression::Path {
-                    expr: Expression::Ident("a".to_string()).into(),
+                    ident: "a".to_string(),
                     parts: vec![]
                 }
                 .into(),
                 operation: Operation::Assignment,
                 rhs: Expression::Function {
-                    ident: None,
                     args: vec![],
                     expr: Expression::Block(vec![
-                        Expression::Local {
+                        Statement::Let {
                             ident: "a".to_string(),
                             value: Some(Expression::Literal(Literal::Integer(2)).into())
                         },
-                        Expression::Literal(Literal::Integer(3))
+                        Statement::Expression(Expression::Literal(Literal::Integer(3)))
                     ])
                     .into()
                 }
                 .into()
-            }
+            })
         );
     }
 
@@ -475,7 +601,7 @@ mod tests {
         let mut parser = Parser::new("2 + 3 \n\t*\n\t\t4");
         assert_eq!(
             parser.parse().expect("Unable to parser operation."),
-            Expression::Operation {
+            Statement::Expression(Expression::Operation {
                 lhs: Expression::Literal(Literal::Integer(2)).into(),
                 operation: Operation::Arithmetic(ArithmeticOperator::Add),
                 rhs: Expression::Operation {
@@ -484,7 +610,7 @@ mod tests {
                     rhs: Expression::Literal(Literal::Integer(4)).into()
                 }
                 .into()
-            }
+            })
         );
     }
 
@@ -493,47 +619,50 @@ mod tests {
         let mut parser = Parser::new("some.function ()");
         assert_eq!(
             parser.parse().expect("Unable to parse expression."),
-            Expression::Call {
-                path: Expression::Path {
-                    expr: Expression::Ident("some".to_string()).into(),
+            Statement::Expression(Expression::Call {
+                callee: Expression::Path {
+                    ident: "some".to_string(),
                     parts: vec![PathPart::Ident("function".to_string())]
                 }
                 .into(),
                 args: vec![Expression::Literal(Literal::Unit)]
-            }
+            })
         )
     }
 
     #[test]
     fn table() {
-        let mut parser =
-            Parser::new("{hello: 1, test: call 2, \"with space\": 2.3, 1: \"number\"}");
+        let mut parser = Parser::new("{hello: 1, test: call 2, \"with space\": 2.3, [1 + 1]: 2}");
         assert_eq!(
             parser.parse().expect("Unable to parse."),
-            Expression::Table(BTreeMap::from([
-                (
-                    PathPart::Ident("hello".to_string()),
-                    Expression::Literal(Literal::Integer(1))
-                ),
-                (
-                    PathPart::Ident("test".to_string()),
-                    Expression::Call {
-                        path: Expression::Path {
-                            expr: Expression::Ident("call".into()).into(),
+            Statement::Expression(Expression::Table(vec![
+                TableEntry {
+                    key: Expression::Literal(Literal::String("hello".to_string())),
+                    value: Expression::Literal(Literal::Integer(1))
+                },
+                TableEntry {
+                    key: Expression::Literal(Literal::String("test".to_string())),
+                    value: Expression::Call {
+                        callee: Expression::Path {
+                            ident: "call".to_string(),
                             parts: vec![]
                         }
                         .into(),
                         args: vec![Expression::Literal(Literal::Integer(2))]
                     }
-                ),
-                (
-                    PathPart::String("with space".to_string()),
-                    Expression::Literal(Literal::Number(2.3))
-                ),
-                (
-                    PathPart::Number(1),
-                    Expression::Literal(Literal::String("number".to_string()))
-                )
+                },
+                TableEntry {
+                    key: Expression::Literal(Literal::String("with space".to_string())),
+                    value: Expression::Literal(Literal::Number(2.3))
+                },
+                TableEntry {
+                    key: Expression::Operation {
+                        lhs: Expression::Literal(Literal::Integer(1)).into(),
+                        operation: Operation::Arithmetic(ArithmeticOperator::Add),
+                        rhs: Expression::Literal(Literal::Integer(1)).into()
+                    },
+                    value: Expression::Literal(Literal::Integer(2))
+                }
             ]))
         )
     }
@@ -543,12 +672,12 @@ mod tests {
         let mut parser = Parser::new("[1, 2, 3, 4]");
         assert_eq!(
             parser.parse().expect("Unable to parse."),
-            Expression::Array(vec![
+            Statement::Expression(Expression::Array(vec![
                 Expression::Literal(Literal::Integer(1)),
                 Expression::Literal(Literal::Integer(2)),
                 Expression::Literal(Literal::Integer(3)),
                 Expression::Literal(Literal::Integer(4))
-            ])
+            ]))
         )
     }
 }

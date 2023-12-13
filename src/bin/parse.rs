@@ -7,7 +7,11 @@ enum ParseCliError {
     MissingInput,
     FileError(std::io::Error),
     ReadWriteError(std::io::Error),
-    ErrorWhileParsing(ParserError),
+    ErrorWhileParsing {
+        error: ParserError,
+        source: String,
+        position: usize,
+    },
 }
 
 fn main() -> Result<(), ParseCliError> {
@@ -27,9 +31,17 @@ fn main() -> Result<(), ParseCliError> {
         match parser.parse() {
             Ok(expr) => tree.push(expr),
             Err(ParserError::EndOfSource) => break,
-            Err(e) => return Err(ParseCliError::ErrorWhileParsing(e)),
+            Err(e) => {
+                return Err(ParseCliError::ErrorWhileParsing {
+                    error: e,
+                    source: parser.get_last_expr_line().to_string(),
+                    position: parser.current_position_in_line(),
+                })
+            }
         }
     }
+
+    println!("{tree:?}");
 
     let mut f = File::create("out.txt").map_err(ParseCliError::FileError)?;
 

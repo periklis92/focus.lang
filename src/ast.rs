@@ -1,15 +1,19 @@
-use std::{
-    collections::BTreeMap,
-    fmt::{Display, Formatter},
-    io::Write,
-};
+#[derive(Debug, PartialEq)]
+pub enum Statement {
+    Let {
+        ident: String,
+        value: Option<Expression>,
+    },
+    Function {
+        ident: String,
+        args: Vec<String>,
+        expr: Expression,
+    },
+    Expression(Expression),
+}
 
 #[derive(Debug, PartialEq)]
 pub enum Expression {
-    Local {
-        ident: String,
-        value: Option<Box<Expression>>,
-    },
     UnaryOperation {
         operand: Box<Expression>,
         operation: UnaryOperation,
@@ -20,30 +24,38 @@ pub enum Expression {
         rhs: Box<Expression>,
     },
     Array(Vec<Expression>),
-    Table(BTreeMap<PathPart, Expression>),
+    Table(Vec<TableEntry>),
     Literal(Literal),
-    Block(Vec<Expression>),
+    Block(Vec<Statement>),
     Path {
-        expr: Box<Expression>,
+        ident: String,
         parts: Vec<PathPart>,
     },
     Call {
-        path: Box<Expression>,
+        callee: Box<Expression>,
         args: Vec<Expression>,
     },
     Function {
-        ident: Option<String>,
         args: Vec<String>,
         expr: Box<Expression>,
     },
-    Ident(String),
+    If {
+        condition: Box<Expression>,
+        block: Box<Expression>,
+        r#else: Option<Box<Expression>>,
+    },
 }
 
-#[derive(Debug, PartialEq, PartialOrd, Ord, Eq)]
+#[derive(Debug, PartialEq)]
+pub struct TableEntry {
+    pub key: Expression,
+    pub value: Expression,
+}
+
+#[derive(Debug, PartialEq)]
 pub enum PathPart {
     Ident(String),
-    Number(i64),
-    String(String),
+    Index(Expression),
 }
 
 #[derive(Debug, PartialEq)]

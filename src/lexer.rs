@@ -34,6 +34,14 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    pub fn line(&self) -> usize {
+        self.line
+    }
+
+    pub fn column(&self) -> usize {
+        self.column
+    }
+
     pub fn position(&self) -> usize {
         self.position
     }
@@ -54,6 +62,10 @@ impl<'a> Lexer<'a> {
         &self.source[range]
     }
 
+    pub fn source(&self) -> &str {
+        self.source
+    }
+
     pub fn peek(&self) -> TokenType {
         self.peek_nth(0)
     }
@@ -65,18 +77,6 @@ impl<'a> Lexer<'a> {
     pub fn peek_indented(&self) -> Option<TokenType> {
         let mut l = self.clone();
         l.next_indented().map(|t| t.token_type)
-    }
-
-    pub fn next_indented(&mut self) -> Option<Token> {
-        if self.next_checked(TokenType::NewLine).is_some() {
-            if self.peek_indentation() > self.indentation {
-                Some(self.next())
-            } else {
-                None
-            }
-        } else {
-            Some(self.next())
-        }
     }
 
     pub fn peek_indentation(&self) -> usize {
@@ -94,9 +94,31 @@ impl<'a> Lexer<'a> {
         l.last_token.token_type
     }
 
+    pub fn peek_continued(&self, indentation: usize) -> Option<Token> {
+        let mut cloned = self.clone();
+        if cloned.peek() == TokenType::NewLine {
+            if cloned.peek_indentation() == indentation {
+                cloned.skip_new_lines();
+                Some(cloned.next())
+            } else {
+                None
+            }
+        } else {
+            Some(cloned.next())
+        }
+    }
+
     pub fn next_checked(&mut self, token_type: TokenType) -> Option<Token> {
         if self.peek() == token_type {
             Some(self.next())
+        } else {
+            None
+        }
+    }
+
+    pub fn next_checked_indented(&mut self, token_type: TokenType) -> Option<Token> {
+        if self.peek_indented().is_some_and(|t| t == token_type) {
+            self.next_indented()
         } else {
             None
         }
@@ -110,12 +132,52 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    pub fn next_checked_continued(
+        &mut self,
+        token_type: TokenType,
+        indentation: usize,
+    ) -> Option<Token> {
+        if self
+            .peek_continued(indentation)
+            .is_some_and(|t| t.token_type == token_type)
+        {
+            self.next_continued(indentation)
+        } else {
+            None
+        }
+    }
+
     pub fn next(&mut self) -> Token {
         self.next_internal(true)
     }
 
     pub fn next_empty(&mut self) -> Token {
         self.next_internal(false)
+    }
+
+    pub fn next_indented(&mut self) -> Option<Token> {
+        if self.next_checked(TokenType::NewLine).is_some() {
+            if self.peek_indentation() > self.indentation {
+                Some(self.next())
+            } else {
+                None
+            }
+        } else {
+            Some(self.next())
+        }
+    }
+
+    pub fn next_continued(&mut self, indentation: usize) -> Option<Token> {
+        if self.peek() == TokenType::NewLine {
+            if self.peek_indentation() == indentation {
+                self.skip_new_lines();
+                Some(self.next())
+            } else {
+                None
+            }
+        } else {
+            Some(self.next())
+        }
     }
 
     fn next_internal(&mut self, skip_empty: bool) -> Token {
@@ -165,7 +227,6 @@ impl<'a> Lexer<'a> {
             ':' => TokenType::Colon,
             ',' => TokenType::Comma,
             '!' if self.next_char_checked('=') => TokenType::NotEqual,
-            '!' => TokenType::Not,
             '+' => TokenType::Plus,
             '=' if self.next_char_checked('=') => TokenType::Equal,
             '=' => TokenType::Assign,
@@ -198,9 +259,8 @@ impl<'a> Lexer<'a> {
             '(' if self.next_char_checked(')') => TokenType::Unit,
             '(' => TokenType::LParen,
             ')' => TokenType::RParen,
-            '&' if self.next_char_checked('&') => TokenType::And,
             '&' => TokenType::BinAnd,
-            '|' if self.next_char_checked('|') => TokenType::Or,
+            '|' if self.next_char_checked('>') => TokenType::Pipe,
             '|' => TokenType::BinAnd,
             '^' => TokenType::BinXor,
             '~' => TokenType::BinNot,
@@ -306,8 +366,8 @@ mod tests {
 
     #[test]
     fn reserved() {
-        let mut lexer = Lexer::new("local a");
-        assert_eq!(lexer.next().token_type, TokenType::Local);
+        let mut lexer = Lexer::new("let a");
+        assert_eq!(lexer.next().token_type, TokenType::Let);
         assert_eq!(lexer.next().token_type, TokenType::Ident);
     }
 
@@ -322,7 +382,7 @@ mod tests {
 
     #[test]
     fn peek() {
-        let mut lexer = Lexer::new("hello.world 123 !");
+        let mut lexer = Lexer::new("hello.world 123 not");
         lexer.next();
         assert_eq!(lexer.peek(), TokenType::Dot);
         assert_eq!(lexer.peek_nth(3), TokenType::Not);
