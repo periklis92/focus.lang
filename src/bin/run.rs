@@ -3,6 +3,7 @@ use std::{fs::File, io::Write, path::Path};
 use focus_third::{
     compiler::{Compiler, CompilerError},
     parser::ParserError,
+    stdlib,
     vm::Vm,
 };
 
@@ -31,6 +32,8 @@ fn main() -> Result<(), RunCliError> {
     )
     .map_err(RunCliError::ReadWriteError)?;
     let mut compiler = Compiler::new(&source);
+    compiler.add_module(stdlib::string::module());
+    compiler.add_module(stdlib::io::module());
     let result = compiler.compile();
     match result {
         Ok(()) => {}
@@ -41,7 +44,7 @@ fn main() -> Result<(), RunCliError> {
     let mut out = File::create(Path::new(&input_filename).with_extension("flb"))
         .map_err(RunCliError::FileError)?;
     write!(out, "{}", compiler.dump()).map_err(RunCliError::ReadWriteError)?;
-    let mut interpreter = Vm::new(compiler.states);
+    let mut interpreter = Vm::new(compiler.states).with_modules(compiler.modules);
     interpreter.interpret();
     let last_value = interpreter.stack().last().unwrap();
     println!("{last_value}");

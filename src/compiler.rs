@@ -10,7 +10,7 @@ use crate::{
     },
     op::{FunctionIdx, InitLen, LocalIdx, OpCode},
     parser::{Parser, ParserError},
-    state::Prototype,
+    state::{Module, Prototype},
     value::Value,
 };
 
@@ -159,6 +159,7 @@ pub struct Compiler<'a> {
     pub states: Vec<CompilerState>,
     pub parser: Parser<'a>,
     pub current_state: usize,
+    pub modules: Vec<Module>,
 }
 
 impl<'a> Compiler<'a> {
@@ -167,6 +168,7 @@ impl<'a> Compiler<'a> {
             states: vec![CompilerState::new("<main>".to_string())],
             parser: Parser::new(source),
             current_state: 0,
+            modules: Vec::new(),
         }
     }
 
@@ -176,6 +178,10 @@ impl<'a> Compiler<'a> {
 
     fn state_mut(&mut self) -> &mut CompilerState {
         &mut self.states[self.current_state]
+    }
+
+    pub fn add_module(&mut self, module: Module) {
+        self.modules.push(module);
     }
 
     pub fn compile(&mut self) -> Result<(), CompilerError> {
@@ -250,7 +256,7 @@ impl<'a> Compiler<'a> {
                         ComparisonOperator::Less => self.add_instruction(OpCode::CmpLess),
                         ComparisonOperator::LessEqual => self.add_instruction(OpCode::CmpLEq),
                         ComparisonOperator::Equal => self.add_instruction(OpCode::CmpEq),
-                        ComparisonOperator::NotEqual => todo!(),
+                        ComparisonOperator::NotEqual => self.add_instruction(OpCode::CmpNEq),
                         ComparisonOperator::GreaterEqual => self.add_instruction(OpCode::CmpGEq),
                         ComparisonOperator::Greater => self.add_instruction(OpCode::CmpGreater),
                     }
@@ -306,7 +312,12 @@ impl<'a> Compiler<'a> {
                     };
                     self.statement(expression)?;
                     if i != num_exprs - 1 && should_pop {
-                        self.add_instruction(OpCode::Pop);
+                        let resolver = &self.states.last().unwrap().resolver;
+                        if resolver.locals[resolver.num_locals() - 1].is_captured {
+                            self.add_instruction(OpCode::CloseUpvalue);
+                        } else {
+                            self.add_instruction(OpCode::Pop);
+                        }
                     } else if i == num_exprs - 1 {
                         let n = self.end_scope();
                         /*for _ in 0..n {
@@ -342,15 +353,10 @@ impl<'a> Compiler<'a> {
                     }
                 }
                 self.add_instruction(getter);
-                for (i, part) in parts.into_iter().enumerate() {
+                for part in parts {
                     match part {
                         PathPart::Ident(ident) => {
-                            let const_idx = self
-                                .state_mut()
-                                .prototype
-                                .add_constant(Value::String(Rc::new(ident.clone())))
-                                .ok_or(CompilerError::MaxNumberOfConstsExceeded)?;
-                            self.add_instruction(OpCode::LoadConst(const_idx));
+                            self.constant(Value::String(Rc::new(ident)))?;
                         }
                         PathPart::Index(expression) => {
                             self.expression(expression)?;
@@ -360,8 +366,8 @@ impl<'a> Compiler<'a> {
                 }
                 Ok(())
             }
-            Expression::Call { callee: path, args } => {
-                self.expression(*path)?;
+            Expression::Call { callee, args } => {
+                self.expression(*callee)?;
                 let num_args = args.len();
                 if num_args > u8::MAX as usize {
                     return Err(CompilerError::MaxNumberOfArgsExceeded);
@@ -407,6 +413,17 @@ impl<'a> Compiler<'a> {
                     OpCode::Jump(ref mut l) => *l = diff,
                     _ => unreachable!(),
                 }
+                Ok(())
+            }
+            Expression::InterpolatedString { format, arguments } => {
+                self.constant(Value::String(Rc::new(format)))?;
+                let instruction = OpCode::CreateList(arguments.len() as u8 + 1);
+                for arg in arguments {
+                    self.expression(arg.expression)?;
+                    self.constant(Value::Integer(arg.offset as i64))?;
+                    self.add_instruction(OpCode::CreateList(2));
+                }
+                self.add_instruction(instruction);
                 Ok(())
             }
         }
@@ -499,22 +516,6 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
 
-    fn resolve_name(&mut self, ident: &str) -> Result<(OpCode, OpCode), CompilerError> {
-        if let Some(local) = self.state().resolver.resolve_local(&ident) {
-            Ok((
-                OpCode::GetLocal(local as LocalIdx),
-                OpCode::SetLocal(local as LocalIdx),
-            ))
-        } else if let Some(upvalue) = self.resolve_upvalue(&ident, self.states.len() - 1) {
-            Ok((
-                OpCode::GetUpvalue(upvalue as LocalIdx),
-                OpCode::SetUpvalue(upvalue as LocalIdx),
-            ))
-        } else {
-            Err(CompilerError::LocalNotFound(ident.to_string()))
-        }
-    }
-
     fn compile_assignment(
         &mut self,
         lhs: Expression,
@@ -525,22 +526,21 @@ impl<'a> Compiler<'a> {
                 let (getter, setter) = self.resolve_name(&ident)?;
                 if parts.is_empty() {
                     self.expression(rhs)?;
-                    if let OpCode::SetLocal(local) = setter {
+                    if let Some(OpCode::SetLocal(local)) = setter {
                         self.state_mut().resolver.mark_initialized(local as usize);
                     }
-                    self.add_instruction(setter);
+                    if let Some(setter) = setter {
+                        self.add_instruction(setter);
+                    } else {
+                        return Err(CompilerError::CannotSetTheValueOfAModule);
+                    }
                 } else {
                     self.add_instruction(getter);
                     let num_parts = parts.len();
                     for (i, part) in parts.into_iter().enumerate() {
                         match part {
                             PathPart::Ident(ident) => {
-                                let const_idx = self
-                                    .state_mut()
-                                    .prototype
-                                    .add_constant(Value::String(Rc::new(ident.clone())))
-                                    .ok_or(CompilerError::MaxNumberOfConstsExceeded)?;
-                                self.add_instruction(OpCode::LoadConst(const_idx));
+                                self.constant(Value::String(Rc::new(ident)))?;
                             }
                             PathPart::Index(expression) => {
                                 self.expression(expression)?;
@@ -557,6 +557,24 @@ impl<'a> Compiler<'a> {
             _ => todo!(),
         }
         Ok(())
+    }
+
+    fn resolve_name(&mut self, ident: &str) -> Result<(OpCode, Option<OpCode>), CompilerError> {
+        if let Some(local) = self.state().resolver.resolve_local(&ident) {
+            Ok((
+                OpCode::GetLocal(local as LocalIdx),
+                Some(OpCode::SetLocal(local as LocalIdx)),
+            ))
+        } else if let Some(upvalue) = self.resolve_upvalue(&ident, self.states.len() - 1) {
+            Ok((
+                OpCode::GetUpvalue(upvalue as LocalIdx),
+                Some(OpCode::SetUpvalue(upvalue as LocalIdx)),
+            ))
+        } else if let Some(module) = self.resolve_module(&ident) {
+            Ok((OpCode::GetModule(module as LocalIdx), None))
+        } else {
+            Err(CompilerError::LocalNotFound(ident.to_string()))
+        }
     }
 
     fn resolve_upvalue(&mut self, ident: &str, depth: usize) -> Option<usize> {
@@ -580,6 +598,10 @@ impl<'a> Compiler<'a> {
         }
 
         None
+    }
+
+    fn resolve_module(&self, ident: &str) -> Option<usize> {
+        self.modules.iter().position(|m| m.ident == ident)
     }
 
     fn add_upvalue(&mut self, depth: usize, index: usize, is_local: bool) -> Option<usize> {
@@ -650,6 +672,7 @@ pub enum CompilerError {
     MaxNumberOfLocalsExceeded,
     MaxNumberOfArgsExceeded,
     NotAValidConstant,
+    CannotSetTheValueOfAModule,
 }
 
 impl From<ParserError> for CompilerError {

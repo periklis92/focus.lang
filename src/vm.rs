@@ -4,7 +4,8 @@ use std::{borrow::BorrowMut, cell::RefCell, rc::Rc, usize};
 use crate::{
     compiler::{Compiler, CompilerState},
     op::OpCode,
-    value::{Closure, ClosureRef, Table, Upvalue, UpvalueRef, Value},
+    state::Module,
+    value::{Closure, ClosureRef, FunctionRef, Table, Upvalue, UpvalueRef, Value},
 };
 
 const NUM_FRAMES: usize = 64;
@@ -21,6 +22,7 @@ pub struct Vm {
     stack: Vec<Value>,
     states: Vec<CompilerState>,
     open_upvalues: Vec<UpvalueRef>,
+    modules: Vec<Rc<Module>>,
 }
 
 impl Vm {
@@ -30,7 +32,15 @@ impl Vm {
             stack: Vec::with_capacity(STACK_SIZE * NUM_FRAMES),
             states,
             open_upvalues: Vec::new(),
+            modules: Vec::new(),
         }
+    }
+
+    pub fn with_modules(mut self, modules: Vec<Module>) -> Self {
+        for module in modules {
+            self.modules.push(Rc::new(module));
+        }
+        self
     }
 
     pub fn interpret(&mut self) {
@@ -45,11 +55,11 @@ impl Vm {
         &self.stack
     }
 
-    pub fn frame(&mut self) -> &CallFrame {
+    fn frame(&mut self) -> &CallFrame {
         self.frames.last().unwrap()
     }
 
-    pub fn frame_mut(&mut self) -> &mut CallFrame {
+    fn frame_mut(&mut self) -> &mut CallFrame {
         self.frames.last_mut().unwrap()
     }
 
@@ -101,6 +111,11 @@ impl Vm {
                         }
                     };
                 }
+                OpCode::GetModule(index) => {
+                    let module = &self.modules[index as usize];
+                    let value = Rc::clone(module);
+                    self.push(Value::Module(value));
+                }
                 OpCode::GetTable => {
                     let key = self.pop();
                     let table = self.pop();
@@ -119,6 +134,15 @@ impl Vm {
                                 self.push(array[index as usize].clone());
                             } else {
                                 panic!("Non integer value cannot index array");
+                            }
+                        }
+                        Value::Module(module) => {
+                            if let Value::String(string) = key {
+                                let local =
+                                    module.locals.iter().find(|l| l.ident == *string).unwrap();
+                                self.push(local.value.clone());
+                            } else {
+                                panic!("Non string key cannot index module");
                             }
                         }
                         _ => todo!(),
@@ -346,6 +370,9 @@ impl Vm {
                         Value::Closure(closure) => {
                             self.call(closure, num_args as usize);
                         }
+                        Value::Function(function) => {
+                            self.call_native(function, num_args as usize);
+                        }
                         _ => panic!("Cannot call non closure value ({value:?})"),
                     }
                 }
@@ -353,6 +380,15 @@ impl Vm {
                     let rhs = self.pop();
                     let lhs = self.pop();
                     if lhs == rhs {
+                        self.push(Value::Bool(true));
+                    } else {
+                        self.push(Value::Bool(false));
+                    }
+                }
+                OpCode::CmpNEq => {
+                    let rhs = self.pop();
+                    let lhs = self.pop();
+                    if lhs != rhs {
                         self.push(Value::Bool(true));
                     } else {
                         self.push(Value::Bool(false));
@@ -510,13 +546,23 @@ impl Vm {
         self.frames.push(frame);
     }
 
-    fn push(&mut self, value: Value) -> usize {
+    fn call_native(&mut self, function: FunctionRef, num_args: usize) {
+        if self.frames.len() == usize::MAX {
+            panic!("Stack overflow: max number of frames.");
+        }
+
+        let value = (function.function)(self);
+        self.stack.drain(self.stack.len() - num_args..);
+        self.push(value);
+    }
+
+    pub fn push(&mut self, value: Value) -> usize {
         let index = self.stack.len();
         self.stack.push(value);
         index
     }
 
-    fn pop(&mut self) -> Value {
+    pub fn pop(&mut self) -> Value {
         self.stack.pop().unwrap()
     }
 }

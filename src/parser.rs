@@ -1,7 +1,7 @@
 use crate::{
     ast::{
         ArithmeticOperator, BinaryOperator, BooleanOperator, ComparisonOperator, Expression,
-        Literal, Operation, PathPart, Statement, TableEntry, UnaryOperation,
+        InterpolatedArgument, Literal, Operation, PathPart, Statement, TableEntry, UnaryOperation,
     },
     lexer::Lexer,
     token::{Token, TokenType},
@@ -198,7 +198,7 @@ impl<'a> Parser<'a> {
                 Ok(Expression::Array(arr))
             }
             TokenType::LCurly => self.table(),
-            TokenType::DoubleQuote => Ok(Expression::Literal(Literal::String(self.string()?))),
+            TokenType::DoubleQuote => self.string(),
             TokenType::True => {
                 self.lexer.next();
                 Ok(Expression::Literal(Literal::Bool(true)))
@@ -231,7 +231,7 @@ impl<'a> Parser<'a> {
                     let token = self.lexer.next();
                     Expression::Literal(Literal::String(self.lexer.slice(token.span).to_string()))
                 }
-                TokenType::DoubleQuote => Expression::Literal(Literal::String(self.string()?)),
+                TokenType::DoubleQuote => self.string()?,
                 token => {
                     return Err(ParserError::UnexpectedTokenOneOf(
                         vec![TokenType::DoubleQuote, TokenType::Ident],
@@ -455,18 +455,55 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn string(&mut self) -> Result<String, ParserError> {
+    fn string(&mut self) -> Result<Expression, ParserError> {
         self.expect(TokenType::DoubleQuote)?;
-        let start_position = self.lexer.position();
+        let mut args = Vec::new();
+        let mut offset = 0;
+        let mut string = String::new();
         while self.lexer.peek() != TokenType::DoubleQuote && self.lexer.peek() != TokenType::Eos {
             if self.lexer.next_checked(TokenType::Eos).is_some() {
                 return Err(ParserError::EarlyEos);
+            } else if self.lexer.peek_empty() == TokenType::LCurly
+                && self.lexer.peek_nth(1) != TokenType::LCurly
+            {
+                self.lexer.next();
+                if self.lexer.peek() == TokenType::Ident {
+                    let arg = self.path()?;
+                    args.push(InterpolatedArgument {
+                        offset,
+                        expression: arg,
+                    });
+                } else if self.lexer.peek() == TokenType::LParen {
+                    let arg = self.primary()?;
+                    args.push(InterpolatedArgument {
+                        offset,
+                        expression: arg,
+                    });
+                } else {
+                    return Err(ParserError::UnexpectedTokenOneOf(
+                        vec![TokenType::LParen, TokenType::Ident],
+                        self.lexer.peek(),
+                    ));
+                }
+                self.expect(TokenType::RCurly)?;
+                offset = 0;
+            } else {
+                self.lexer.next_checked_empty(TokenType::LCurly);
+                self.lexer.next_checked_empty(TokenType::RCurly);
+                let token = self.lexer.next_empty();
+                offset += token.span.len();
+                string.push_str(self.lexer.slice(token.span));
             }
-            self.lexer.next();
         }
         self.expect(TokenType::DoubleQuote)?;
-        let str = self.lexer.slice(start_position..self.lexer.position() - 1);
-        Ok(str.to_string())
+        if args.is_empty() {
+            Ok(Expression::Literal(Literal::String(string)))
+        } else {
+            Ok(Expression::InterpolatedString {
+                format: string.to_string(),
+                arguments: args,
+            })
+        }
     }
 
     fn path(&mut self) -> Result<Expression, ParserError> {

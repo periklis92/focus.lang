@@ -44,6 +44,10 @@ pub enum Expression {
         block: Box<Expression>,
         r#else: Option<Box<Expression>>,
     },
+    InterpolatedString {
+        format: String,
+        arguments: Vec<InterpolatedArgument>,
+    },
 }
 
 #[derive(Debug, PartialEq)]
@@ -134,4 +138,10 @@ pub enum Literal {
     Integer(i64),
     Number(f64),
     String(String),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct InterpolatedArgument {
+    pub offset: usize,
+    pub expression: Expression,
 }

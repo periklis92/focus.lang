@@ -3,6 +3,24 @@ use crate::{
     value::Value,
 };
 
+#[derive(Debug)]
+pub struct ModuleLocal {
+    pub ident: String,
+    pub value: Value,
+}
+
+#[derive(Debug)]
+pub struct Module {
+    pub ident: String,
+    pub locals: Vec<ModuleLocal>,
+}
+
+impl Module {
+    pub fn local(&self, ident: &str) -> Option<usize> {
+        self.locals.iter().position(|l| l.ident == ident)
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Name {
     pub ident: String,

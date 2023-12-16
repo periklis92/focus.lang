@@ -15,6 +15,7 @@ pub enum OpCode {
 
     GetLocal(LocalIdx),
     GetUpvalue(LocalIdx),
+    GetModule(LocalIdx),
     GetTable,
 
     SetLocal(LocalIdx),
@@ -36,6 +37,7 @@ pub enum OpCode {
     Not,
 
     CmpEq,
+    CmpNEq,
     CmpLess,
     CmpGreater,
     CmpLEq,
@@ -62,6 +64,7 @@ impl Display for OpCode {
             OpCode::LoadInt(int) => write!(f, "LoadInt {int}"),
             OpCode::GetLocal(idx) => write!(f, "GetLocal {idx}"),
             OpCode::GetUpvalue(idx) => write!(f, "GetUpvalue {idx}"),
+            OpCode::GetModule(idx) => write!(f, "GetModule {idx}"),
             OpCode::GetTable => write!(f, "GetTable"),
             OpCode::SetLocal(idx) => write!(f, "SetLocal {idx}"),
             OpCode::SetUpvalue(idx) => write!(f, "SetUpvalue {idx}"),
@@ -78,6 +81,7 @@ impl Display for OpCode {
             OpCode::Negate => write!(f, "Negate"),
             OpCode::Not => write!(f, "Not"),
             OpCode::CmpEq => write!(f, "CmpEq"),
+            OpCode::CmpNEq => write!(f, "CmpNEq"),
             OpCode::CmpLess => write!(f, "CmpLess"),
             OpCode::CmpGreater => write!(f, "CmpGreater"),
             OpCode::CmpLEq => write!(f, "CmpLEq"),
