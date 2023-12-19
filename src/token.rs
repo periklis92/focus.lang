@@ -120,6 +120,9 @@ token_types!(
     If "if" reserved,
     Then "then" reserved,
     Else "else" reserved,
+    From "from" reserved,
+    Import "import" reserved,
+    As "as" reserved,
 );
 
 impl TokenType {

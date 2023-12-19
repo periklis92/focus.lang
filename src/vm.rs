@@ -1,11 +1,11 @@
 use core::panic;
-use std::{borrow::BorrowMut, cell::RefCell, rc::Rc, usize};
+use std::{cell::RefCell, rc::Rc, usize};
 
 use crate::{
-    compiler::{Compiler, CompilerState},
+    compiler::CompilerState,
     op::OpCode,
-    state::Module,
-    value::{Closure, ClosureRef, FunctionRef, Table, Upvalue, UpvalueRef, Value},
+    state::{Module, Prototype},
+    value::{ArrayRef, Closure, ClosureRef, Function, Table, Upvalue, UpvalueRef, Value},
 };
 
 const NUM_FRAMES: usize = 64;
@@ -20,35 +20,62 @@ struct CallFrame {
 pub struct Vm {
     frames: Vec<CallFrame>,
     stack: Vec<Value>,
-    states: Vec<CompilerState>,
+    module_stack: Vec<Rc<Module>>,
     open_upvalues: Vec<UpvalueRef>,
+    compiled_modules: Vec<ArrayRef>,
     modules: Vec<Rc<Module>>,
 }
 
 impl Vm {
-    pub fn new(states: Vec<CompilerState>) -> Self {
+    pub fn new() -> Self {
         Self {
             frames: Vec::with_capacity(NUM_FRAMES),
             stack: Vec::with_capacity(STACK_SIZE * NUM_FRAMES),
-            states,
+            module_stack: Vec::new(),
             open_upvalues: Vec::new(),
+            compiled_modules: Vec::new(),
             modules: Vec::new(),
         }
     }
 
     pub fn with_modules(mut self, modules: Vec<Module>) -> Self {
         for module in modules {
-            self.modules.push(Rc::new(module));
+            let module = Rc::new(module);
+            self.modules.push(module.clone());
+            if module.is_executed {
+                self.module_stack.push(module);
+            }
         }
         self
     }
 
+    pub fn execute_module(&mut self, module: Module, ident: &str) {
+        // let index = module.local(ident).unwrap();
+        // let loaded_module = Rc::new(self.load_module(module));
+        // let closure = loaded_module.value(index).clone().as_closure().unwrap();
+        // self.module_stack.push(loaded_module);
+        // self.call(closure, 0, true);
+        // self.run();
+        todo!()
+    }
+
+    fn load_module(&mut self, mut module: Module) {
+        let module = Rc::new(module);
+        let main = Rc::new(module.prototypes[0].clone());
+        let closure = Rc::new(Closure::from_prototype(main));
+        self.call(closure, 0, false);
+        self.module_stack.push(module.clone());
+        self.run();
+        // module.values = self.stack.drain(0..self.stack.len()).collect();
+    }
+
     pub fn interpret(&mut self) {
-        let main = Rc::new(self.states[0].prototype.clone());
-        let closure = Rc::new(Closure::new(main));
+        /*    let main = Rc::new(self.states[0].prototype.clone());
+        let closure = Rc::new(Closure::from_prototype(main));
         self.push(Value::Closure(Rc::clone(&closure)));
         self.call(closure, 0);
-        self.run();
+        self.run();*/
+        todo!()
     }
 
     pub fn stack(&self) -> &[Value] {
@@ -63,14 +90,27 @@ impl Vm {
         self.frames.last_mut().unwrap()
     }
 
+    fn module(&self) -> Rc<Module> {
+        self.module_stack.last().unwrap().clone()
+    }
+
     fn run(&mut self) {
         loop {
             self.frame_mut().ip += 1;
-            if self.frame_mut().ip > self.frame_mut().closure.function.code.len() {
+            if self.frame_mut().ip
+                > self
+                    .frame()
+                    .closure
+                    .function
+                    .prototype()
+                    .unwrap()
+                    .code
+                    .len()
+            {
                 break;
             }
             let ip = self.frame_mut().ip - 1;
-            let code = self.frame_mut().closure.function.code[ip];
+            let code = self.frame_mut().closure.function.prototype().unwrap().code[ip];
 
             match code {
                 OpCode::LoadConst(index) => {
@@ -78,6 +118,8 @@ impl Vm {
                         .frame_mut()
                         .closure
                         .function
+                        .prototype()
+                        .unwrap()
                         .constant(index as usize)
                         .clone();
                     self.push(value);
@@ -96,7 +138,7 @@ impl Vm {
                 }
                 OpCode::GetLocal(slot) => {
                     let offset = self.frames.last().unwrap().slot_offset;
-                    let entry = self.stack.get(offset + slot as usize).unwrap().clone();
+                    let entry = self.stack[offset + slot as usize].clone();
                     self.push(entry);
                 }
                 OpCode::GetUpvalue(index) => {
@@ -116,14 +158,19 @@ impl Vm {
                     let value = Rc::clone(module);
                     self.push(Value::Module(value));
                 }
+                OpCode::GetModuleValue(index) => {
+                    // let value = self.module().value(index as usize).clone();
+                    // self.push(value);
+                    todo!()
+                }
                 OpCode::GetTable => {
                     let key = self.pop();
                     let table = self.pop();
                     match table {
                         Value::Table(table) => {
                             let table = RefCell::borrow_mut(table.as_ref());
-                            let table = table.get(&key).cloned().unwrap_or(Value::Unit);
-                            self.push(table);
+                            let value = table.get(&key).cloned().unwrap_or(Value::Unit);
+                            self.push(value);
                         }
                         Value::Array(array) => {
                             if let Value::Integer(index) = key {
@@ -137,15 +184,15 @@ impl Vm {
                             }
                         }
                         Value::Module(module) => {
-                            if let Value::String(string) = key {
-                                let local =
-                                    module.locals.iter().find(|l| l.ident == *string).unwrap();
-                                self.push(local.value.clone());
-                            } else {
-                                panic!("Non string key cannot index module");
-                            }
+                            // if let Value::Integer(integer) = key {
+                            //     let value = module.values[integer as usize].clone();
+                            //     self.push(value);
+                            // } else {
+                            //     panic!("Non string key cannot index module");
+                            // }
+                            todo!()
                         }
-                        _ => todo!(),
+                        _ => panic!("Unable to index value {table:?}"),
                     }
                 }
                 OpCode::SetLocal(slot) => {
@@ -164,6 +211,9 @@ impl Vm {
                             *val = value;
                         }
                     }
+                }
+                OpCode::SetModuleValue(index) => {
+                    todo!()
                 }
                 OpCode::SetTable => {
                     let value = self.pop();
@@ -187,7 +237,7 @@ impl Vm {
                                 panic!("Non integer value cannot index array");
                             }
                         }
-                        _ => todo!(),
+                        _ => panic!("Unable to index value {table:?}"),
                     }
                 }
                 OpCode::CreateList(size) => {
@@ -208,12 +258,13 @@ impl Vm {
                     self.push(Value::Table(Rc::new(RefCell::new(table))));
                 }
                 OpCode::Closure(index) => {
-                    let function = self.states[index as usize].prototype.clone();
-                    let mut closure = Closure::new(Rc::new(function));
+                    let function = self.module().prototypes[index as usize].clone();
+                    let mut closure = Closure::from_prototype(Rc::new(function));
 
                     for i in 0..closure.num_upvalues {
-                        let is_local = self.states[index as usize].upvalues[i].is_local;
-                        let index = self.states[index as usize].upvalues[i].index;
+                        let is_local =
+                            self.module().prototypes[index as usize].upvalues[i].is_local;
+                        let index = self.module().prototypes[index as usize].upvalues[i].index;
                         if is_local {
                             let slot_offset = self.frames.last().unwrap().slot_offset;
                             let upvalue = self.capture_upvalue(slot_offset + index as usize);
@@ -367,12 +418,10 @@ impl Vm {
                         .unwrap()
                         .clone();
                     match value {
-                        Value::Closure(closure) => {
-                            self.call(closure, num_args as usize);
-                        }
-                        Value::Function(function) => {
-                            self.call_native(function, num_args as usize);
-                        }
+                        Value::Closure(closure) => match &closure.function {
+                            Function::Prototype(_) => self.call(closure, num_args as usize, true),
+                            Function::Native(_) => self.call_native(closure, num_args as usize),
+                        },
                         _ => panic!("Cannot call non closure value ({value:?})"),
                     }
                 }
@@ -457,10 +506,9 @@ impl Vm {
                 OpCode::Jump(location) => {
                     self.frames.last_mut().unwrap().ip += location as usize;
                 }
-                OpCode::CloseUpvalue => {
-                    let index = self.stack.len() - 1;
-                    self.close_upvalues(index);
-                    self.pop();
+                OpCode::CloseUpvalue(index) => {
+                    let offset = self.frame().slot_offset;
+                    self.close_upvalues(offset + index as usize);
                 }
                 OpCode::Pop => {
                     self.pop();
@@ -479,7 +527,14 @@ impl Vm {
                         let frame_offset = frame.slot_offset;
                         self.stack.truncate(frame_offset);
                         self.push(result);
+                        return;
                     }
+                }
+                OpCode::CreateModule => {
+                    let frame = self.frames.pop().unwrap();
+                    let values = self.stack.drain(frame.slot_offset..).collect();
+                    let compiled_module = Rc::new(RefCell::new(values));
+                    self.compiled_modules.push(compiled_module);
                 }
             }
         }
@@ -529,8 +584,8 @@ impl Vm {
         self.open_upvalues.truncate(i);
     }
 
-    fn call(&mut self, closure: ClosureRef, num_args: usize) {
-        if closure.function.num_args != num_args {
+    pub fn call(&mut self, closure: ClosureRef, num_args: usize, recursive: bool) {
+        if closure.function.prototype().unwrap().num_args != num_args {
             panic!("Incorrect number of arguments.");
         }
 
@@ -541,19 +596,37 @@ impl Vm {
         let frame = CallFrame {
             closure,
             ip: 0,
-            slot_offset: (self.stack.len() - num_args - 1),
+            slot_offset: (self.stack.len() - num_args - if recursive { 1 } else { 0 }),
         };
         self.frames.push(frame);
+        self.run();
     }
 
-    fn call_native(&mut self, function: FunctionRef, num_args: usize) {
+    fn call_native(&mut self, closure: ClosureRef, num_args: usize) {
         if self.frames.len() == usize::MAX {
             panic!("Stack overflow: max number of frames.");
         }
 
-        let value = (function.function)(self);
-        self.stack.drain(self.stack.len() - num_args..);
-        self.push(value);
+        let frame = CallFrame {
+            closure: closure.clone(),
+            ip: 0,
+            slot_offset: (self.stack.len() - num_args),
+        };
+        self.frames.push(frame);
+        let result = (closure.function.native().unwrap().function)(self);
+        let frame = self.frames.pop().unwrap();
+        self.pop();
+        if self.frames.is_empty() {
+            return;
+        }
+
+        let frame_offset = frame.slot_offset;
+        self.stack.truncate(frame_offset);
+        self.push(result);
+    }
+
+    pub fn top(&mut self) -> usize {
+        self.stack.len() - self.frame().slot_offset
     }
 
     pub fn push(&mut self, value: Value) -> usize {

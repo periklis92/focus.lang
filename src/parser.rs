@@ -1,7 +1,7 @@
 use crate::{
     ast::{
-        ArithmeticOperator, BinaryOperator, BooleanOperator, ComparisonOperator, Expression,
-        InterpolatedArgument, Literal, Operation, PathPart, Statement, TableEntry, UnaryOperation,
+        ArithmeticOperator, BooleanOperator, ComparisonOperator, Expression, InterpolatedArgument,
+        Literal, Operation, PathPart, Statement, TableEntry, UnaryOperation,
     },
     lexer::Lexer,
     token::{Token, TokenType},
@@ -11,6 +11,8 @@ use crate::{
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
     last_expr_start_position: usize,
+    last_expr_line: usize,
+    depth: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -18,6 +20,8 @@ impl<'a> Parser<'a> {
         Self {
             lexer: Lexer::new(source),
             last_expr_start_position: 0,
+            last_expr_line: 0,
+            depth: 0,
         }
     }
 
@@ -31,6 +35,10 @@ impl<'a> Parser<'a> {
 
     pub fn current_position_in_line(&self) -> usize {
         self.current_position() - self.last_expr_start_position
+    }
+
+    pub fn last_expr_line(&self) -> usize {
+        self.last_expr_line
     }
 
     pub fn get_last_expr_source(&self) -> &str {
@@ -68,7 +76,14 @@ impl<'a> Parser<'a> {
 
     pub fn parse(&mut self) -> Result<Statement, ParserError> {
         let statement = self.statement()?;
-        self.expect(TokenType::NewLine)?;
+        if self.lexer.next_checked(TokenType::NewLine).is_none()
+            && self.lexer.next_checked(TokenType::Eos).is_none()
+        {
+            return Err(ParserError::UnexpectedToken(
+                TokenType::NewLine,
+                self.lexer.peek(),
+            ));
+        }
         Ok(statement)
     }
 
@@ -76,11 +91,14 @@ impl<'a> Parser<'a> {
         self.lexer.skip_new_lines();
         let token = self.lexer.peek();
         self.last_expr_start_position = self.lexer.position();
+        self.last_expr_line = self.lexer.line();
         match token {
             TokenType::Let => self.r#let(),
-            TokenType::Function => self.function_statement(),
+            TokenType::From => todo!(),
+            TokenType::Import => todo!(),
             TokenType::Eos => Err(ParserError::EndOfSource),
             TokenType::Unknown => Err(ParserError::UnknownToken),
+            _ if self.depth == 0 => Err(ParserError::TopLevelExpressionNotAllowed),
             _ => Ok(Statement::Expression(self.expression()?)),
         }
     }
@@ -254,32 +272,52 @@ impl<'a> Parser<'a> {
 
     fn r#let(&mut self) -> Result<Statement, ParserError> {
         self.expect(TokenType::Let)?;
-        let token = self.expect(TokenType::Ident)?;
-        let ident = self.lexer.slice(token.span).to_string();
-        let value = if self.lexer.next_checked(TokenType::Assign).is_none() {
-            None
+        if self.lexer.peek_nth(1) == TokenType::Ident || self.lexer.peek_nth(1) == TokenType::Unit {
+            self.function_statement()
         } else {
-            Some(self.expression()?)
-        };
-        Ok(Statement::Let { ident, value })
+            let token = self.expect(TokenType::Ident)?;
+            let ident = self.lexer.slice(token.span).to_string();
+            let value = if self.lexer.next_checked(TokenType::Assign).is_none() {
+                None
+            } else {
+                Some(self.expression()?)
+            };
+            Ok(Statement::Let { ident, value })
+        }
     }
 
     fn block(&mut self) -> Result<Expression, ParserError> {
+        self.depth += 1;
         let statements = if self.lexer.peek() == TokenType::NewLine {
             let start_indentation = self.lexer.indentation();
             self.lexer.next(); // Skip new line
-
             self.block_with_indentation(start_indentation)?
         } else {
             vec![self.statement()?]
         };
-
-        match statements.last() {
-            Some(Statement::Let { .. } | Statement::Function { .. }) => {
-                Err(ParserError::FoundStatementWhereExpressionWasExpected)
-            }
-            _ => Ok(Expression::Block(statements)),
+        if statements.len() > 1
+            && !statements.iter().take(statements.len() - 2).all(|stm| {
+                !stm.is_expression()
+                    || matches!(
+                        stm,
+                        Statement::Expression(
+                            Expression::Operation {
+                                operation: Operation::Assignment,
+                                ..
+                            } | Expression::Call { .. }
+                        )
+                    )
+            })
+        {
+            self.depth -= 1;
+            return Err(ParserError::FoundExpressionWhenStatementWasExpected);
         }
+        if statements.last().is_some_and(|s| !s.is_expression()) {
+            self.depth -= 1;
+            return Err(ParserError::FoundStatementWhereExpressionWasExpected);
+        }
+        self.depth -= 1;
+        Ok(Expression::Block(statements))
     }
 
     fn block_with_indentation(
@@ -287,8 +325,15 @@ impl<'a> Parser<'a> {
         indentation: usize,
     ) -> Result<Vec<Statement>, ParserError> {
         let mut block = Vec::new();
-        while self.lexer.peek_indentation() > indentation {
+        let block_indentation = self.lexer.peek_indentation();
+        if block_indentation < indentation {
+            return Err(ParserError::InvalidIndentation);
+        }
+        while self.lexer.peek_indentation() == block_indentation {
             block.push(self.statement()?);
+        }
+        if self.lexer.peek_indentation() > block_indentation {
+            return Err(ParserError::InvalidIndentation);
         }
 
         if block.is_empty() {
@@ -311,6 +356,7 @@ impl<'a> Parser<'a> {
             TokenType::LParen => {
                 cloned.lexer.next();
                 cloned.expression()?;
+                cloned.lexer.skip_new_lines();
                 cloned.expect(TokenType::RParen)?;
                 Ok(cloned
                     .lexer
@@ -349,30 +395,29 @@ impl<'a> Parser<'a> {
     }
 
     fn function_statement(&mut self) -> Result<Statement, ParserError> {
-        self.expect(TokenType::Function)?;
         let token = self.expect(TokenType::Ident)?;
         let ident = self.lexer().slice(token.span).to_string();
-        let args = self.function_args()?;
-        self.expect(TokenType::ThinArrow)?;
+        let args = if self.lexer.next_checked(TokenType::Unit).is_none() {
+            self.function_args(TokenType::Assign)?
+        } else {
+            Vec::new()
+        };
+        self.expect(TokenType::Assign)?;
         let expr = self.block()?.into();
         Ok(Statement::Function { ident, args, expr })
     }
 
     fn function_expression(&mut self) -> Result<Expression, ParserError> {
         self.expect(TokenType::Function)?;
-        let args = self.function_args()?;
+        let args = self.function_args(TokenType::ThinArrow)?;
         self.expect(TokenType::ThinArrow)?;
         let expr = self.block()?.into();
         Ok(Expression::Function { args, expr })
     }
 
-    fn function_args(&mut self) -> Result<Vec<String>, ParserError> {
+    fn function_args(&mut self, func_token: TokenType) -> Result<Vec<String>, ParserError> {
         let mut args = Vec::new();
-        while self
-            .lexer
-            .peek_indented()
-            .is_some_and(|t| t != TokenType::ThinArrow)
-        {
+        while self.lexer.peek_indented().is_some_and(|t| t != func_token) {
             let token = self.expect_indented(TokenType::Ident)?;
             let ident = self.lexer.slice(token.span).to_string();
             args.push(ident);
@@ -436,12 +481,6 @@ impl<'a> Parser<'a> {
             TokenType::Mod => Some(Operation::Arithmetic(ArithmeticOperator::Modulus)),
             TokenType::And => Some(Operation::Boolean(BooleanOperator::And)),
             TokenType::Or => Some(Operation::Boolean(BooleanOperator::Or)),
-            TokenType::BinOr => Some(Operation::Binary(BinaryOperator::Or)),
-            TokenType::BinAnd => Some(Operation::Binary(BinaryOperator::And)),
-            TokenType::Lsh => Some(Operation::Binary(BinaryOperator::Lsh)),
-            TokenType::Rsh => Some(Operation::Binary(BinaryOperator::Rsh)),
-            TokenType::BinXor => Some(Operation::Binary(BinaryOperator::Xor)),
-            TokenType::BinNot => Some(Operation::Binary(BinaryOperator::Not)),
             TokenType::Greater => Some(Operation::Comparison(ComparisonOperator::Greater)),
             TokenType::GreaterEqual => {
                 Some(Operation::Comparison(ComparisonOperator::GreaterEqual))
@@ -554,6 +593,8 @@ pub enum ParserError {
     InvalidEmptySpace,
     UnexpectedExpression(String),
     FoundStatementWhereExpressionWasExpected,
+    FoundExpressionWhenStatementWasExpected,
+    TopLevelExpressionNotAllowed,
 }
 
 #[cfg(test)]

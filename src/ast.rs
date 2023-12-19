@@ -9,7 +9,17 @@ pub enum Statement {
         args: Vec<String>,
         expr: Expression,
     },
+    Import {
+        source: ImportSource,
+        imports: Vec<Import>,
+    },
     Expression(Expression),
+}
+
+impl Statement {
+    pub fn is_expression(&self) -> bool {
+        matches!(self, Statement::Expression(_))
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -74,7 +84,6 @@ pub enum Operation {
     Arithmetic(ArithmeticOperator),
     Comparison(ComparisonOperator),
     Boolean(BooleanOperator),
-    Binary(BinaryOperator),
 }
 
 impl Operation {
@@ -90,7 +99,6 @@ impl Operation {
                 | ArithmeticOperator::IDivide
                 | ArithmeticOperator::Modulus,
             ) => 40,
-            Operation::Binary(_) => 50,
         }
     }
 }
@@ -122,16 +130,6 @@ pub enum BooleanOperator {
 }
 
 #[derive(Debug, PartialEq)]
-pub enum BinaryOperator {
-    And,
-    Or,
-    Xor,
-    Lsh,
-    Rsh,
-    Not,
-}
-
-#[derive(Debug, PartialEq)]
 pub enum Literal {
     Unit,
     Bool(bool),
@@ -144,4 +142,16 @@ pub enum Literal {
 pub struct InterpolatedArgument {
     pub offset: usize,
     pub expression: Expression,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum ImportSource {
+    Module(String),
+    File(String),
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Import {
+    Local { ident: String, alias: String },
+    All { alias: Option<String> },
 }

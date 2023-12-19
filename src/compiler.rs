@@ -1,4 +1,5 @@
 use std::{
+    cell::{RefCell, RefMut},
     io::{BufWriter, Write},
     rc::Rc,
 };
@@ -10,19 +11,11 @@ use crate::{
     },
     op::{FunctionIdx, InitLen, LocalIdx, OpCode},
     parser::{Parser, ParserError},
-    state::{Module, Prototype},
+    state::{Local, Module, Prototype},
     value::Value,
 };
 
-#[derive(Debug)]
-pub struct Local {
-    ident: String,
-    depth: usize,
-    is_captured: bool,
-    is_initialized: bool,
-}
-
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Upvalue {
     pub index: usize,
     pub is_local: bool,
@@ -32,6 +25,8 @@ pub struct Upvalue {
 pub struct ScopeResolver {
     locals: Vec<Local>,
     depth: usize,
+    base_depth: usize,
+    parent_scope: Option<usize>,
 }
 
 impl ScopeResolver {
@@ -39,7 +34,24 @@ impl ScopeResolver {
         Self {
             locals: Vec::new(),
             depth: 0,
+            base_depth: 0,
+            parent_scope: None,
         }
+    }
+
+    pub fn with_parent(mut self, parent: usize) -> Self {
+        self.parent_scope = Some(parent);
+        self
+    }
+
+    pub fn with_depth(mut self, depth: usize) -> Self {
+        self.depth = depth;
+        self.base_depth = depth;
+        self
+    }
+
+    pub fn parent(&self) -> Option<usize> {
+        self.parent_scope
     }
 
     pub fn begin_scope(&mut self) {
@@ -47,15 +59,20 @@ impl ScopeResolver {
     }
 
     pub fn end_scope(&mut self) -> usize {
-        self.depth -= 1;
-
-        let mut count = 0;
-        while !self.locals.is_empty() && self.locals.last().unwrap().depth > self.depth {
-            count += 1;
-            self.locals.pop();
+        let n = self.num_locals_defined_in_scope();
+        if self.depth > self.base_depth {
+            self.depth -= 1;
         }
+        self.locals.truncate(self.locals.len() - n);
+        n
+    }
 
-        count
+    pub fn num_locals_defined_in_scope(&self) -> usize {
+        self.locals
+            .iter()
+            .rev()
+            .take_while(|l| l.depth >= self.depth)
+            .count()
     }
 
     pub fn depth(&self) -> usize {
@@ -72,18 +89,13 @@ impl ScopeResolver {
         }
 
         let local = Local {
-            ident,
+            ident: ident.clone(),
             depth: self.depth,
             is_captured: false,
-            is_initialized: false,
         };
         let index = self.locals.len();
         self.locals.push(local);
         Ok(index)
-    }
-
-    pub fn mark_initialized(&mut self, local_idx: usize) {
-        self.locals[local_idx].is_initialized = true;
     }
 
     pub fn local(&self, index: usize) -> &Local {
@@ -110,18 +122,30 @@ impl ScopeResolver {
 
 #[derive(Debug)]
 pub struct CompilerState {
+    pub parent: Option<Rc<RefCell<CompilerState>>>,
     pub prototype: Prototype,
     pub resolver: ScopeResolver,
-    pub upvalues: Vec<Upvalue>,
+    pub defined_states: Vec<Rc<RefCell<CompilerState>>>,
 }
 
 impl CompilerState {
     pub fn new(ident: String) -> Self {
         Self {
+            parent: None,
             resolver: ScopeResolver::new(),
             prototype: Prototype::new(ident),
-            upvalues: Vec::new(),
+            defined_states: Vec::new(),
         }
+    }
+
+    pub fn with_depth(mut self, depth: usize) -> Self {
+        self.resolver = self.resolver.with_depth(depth);
+        self
+    }
+
+    pub fn with_parent(mut self, parent: Rc<RefCell<CompilerState>>) -> Self {
+        self.parent = Some(parent);
+        self
     }
 
     fn dump(&self, w: &mut impl Write) {
@@ -129,21 +153,21 @@ impl CompilerState {
 
         let mut last_line = 0;
         for (i, op) in self.prototype.op_codes().iter().enumerate() {
-            /*let line = self.prototype.line(i);
+            let line = self.prototype.line(i);
             if last_line < line + 1 {
                 last_line = line + 1;
                 writeln!(w, "{last_line}:").unwrap();
-            }*/
+            }
             writeln!(w, " {op}").unwrap();
         }
 
-        /*writeln!(w, "\nLocals:").unwrap();
-        for (i, l) in self.locals.iter().enumerate() {
-            writeln!(w, "{i}: {}", l.ident).unwrap();
-        }*/
+        writeln!(w, "\nLocals:").unwrap();
+        for (i, l) in self.prototype.debug_info.locals.iter().enumerate() {
+            writeln!(w, "{i}: ident: {}, depth: {}", l.ident, l.depth).unwrap();
+        }
 
         writeln!(w, "\nUpvalues:").unwrap();
-        for (i, u) in self.upvalues.iter().enumerate() {
+        for (i, u) in self.prototype.upvalues.iter().enumerate() {
             writeln!(w, "{i}: index: {} is_local: {}", u.index, u.is_local).unwrap();
         }
 
@@ -156,7 +180,7 @@ impl CompilerState {
 }
 
 pub struct Compiler<'a> {
-    pub states: Vec<CompilerState>,
+    pub state: Rc<RefCell<CompilerState>>,
     pub parser: Parser<'a>,
     pub current_state: usize,
     pub modules: Vec<Module>,
@@ -164,24 +188,49 @@ pub struct Compiler<'a> {
 
 impl<'a> Compiler<'a> {
     pub fn new(source: &'a str) -> Self {
+        // Rc::new(RefCell::new(CompilerState))
         Self {
-            states: vec![CompilerState::new("<main>".to_string())],
+            state: Rc::new(RefCell::new(CompilerState::new("<main>".to_string()))),
             parser: Parser::new(source),
             current_state: 0,
             modules: Vec::new(),
         }
     }
 
-    fn state(&self) -> &CompilerState {
-        &self.states[self.current_state]
+    fn state(&self) -> std::cell::Ref<'_, CompilerState> {
+        self.state.borrow()
     }
 
-    fn state_mut(&mut self) -> &mut CompilerState {
-        &mut self.states[self.current_state]
+    fn state_mut(&self) -> RefMut<'_, CompilerState> {
+        self.state.borrow_mut()
     }
 
     pub fn add_module(&mut self, module: Module) {
         self.modules.push(module);
+    }
+
+    pub fn compile_module(mut self, ident: &str) -> Result<Module, CompilerError> {
+        let mut module = Module::new(ident);
+        loop {
+            let expr = self.parser.parse();
+            match expr {
+                Ok(Statement::Import { source, imports }) => todo!(),
+                Ok(Statement::Let { ref ident, .. }) => {
+                    module.add_local(ident);
+                    self.statement(expr.unwrap())?;
+                }
+                Ok(Statement::Function { ref ident, .. }) => {
+                    module.add_local(ident);
+                    self.statement(expr.unwrap())?;
+                }
+                Err(ParserError::EndOfSource) => break,
+                Err(e) => return Err(CompilerError::ParserError(e)),
+                _ => unreachable!(),
+            }
+        }
+        self.emit_code(OpCode::CreateModule);
+        //module.prototypes = self.states.into_iter().map(|s| s.prototype).collect();
+        Ok(module)
     }
 
     pub fn compile(&mut self) -> Result<(), CompilerError> {
@@ -200,30 +249,34 @@ impl<'a> Compiler<'a> {
                 }
             }
         }
-        self.begin_scope();
-        self.state_mut().resolver.add_local("<main>".to_string())?;
+        self.add_local("<main>".to_string())?;
         for statement in expressions {
             self.statement(statement)?;
         }
         Ok(())
     }
 
-    pub fn statement(&mut self, expression: Statement) -> Result<(), CompilerError> {
-        match expression {
+    pub fn statement(&mut self, statement: Statement) -> Result<(), CompilerError> {
+        match statement {
             Statement::Let { ident, value } => {
-                let index = self.state_mut().resolver.add_local(ident)?;
                 if let Some(expression) = value {
                     self.expression(expression)?;
-                    self.state_mut().resolver.mark_initialized(index);
+                } else {
+                    self.emit_code(OpCode::LoadUnit);
                 }
+                self.add_local(ident)?;
                 Ok(())
             }
             Statement::Function { ident, args, expr } => {
                 self.function(ident.clone(), args, expr)?;
-                self.state_mut().resolver.add_local(ident)?;
+                self.add_local(ident)?;
                 Ok(())
             }
-            Statement::Expression(expression) => self.expression(expression),
+            Statement::Import { source, imports } => todo!(),
+            Statement::Expression(expression) => {
+                self.expression(expression)?;
+                Ok(())
+            }
         }
     }
 
@@ -232,8 +285,8 @@ impl<'a> Compiler<'a> {
             Expression::UnaryOperation { operand, operation } => {
                 self.expression(*operand)?;
                 match operation {
-                    UnaryOperation::Not => self.add_instruction(OpCode::Not),
-                    UnaryOperation::Negate => self.add_instruction(OpCode::Negate),
+                    UnaryOperation::Not => self.emit_code(OpCode::Not),
+                    UnaryOperation::Negate => self.emit_code(OpCode::Negate),
                 }
                 Ok(())
             }
@@ -242,7 +295,7 @@ impl<'a> Compiler<'a> {
                 operation,
                 rhs,
             } => match operation {
-                Operation::Assignment => self.compile_assignment(*lhs, *rhs),
+                Operation::Assignment => self.assignment(*lhs, *rhs),
                 Operation::Arithmetic(operator) => {
                     self.expression(*lhs)?;
                     self.expression(*rhs)?;
@@ -253,12 +306,12 @@ impl<'a> Compiler<'a> {
                     self.expression(*lhs)?;
                     self.expression(*rhs)?;
                     match comparison {
-                        ComparisonOperator::Less => self.add_instruction(OpCode::CmpLess),
-                        ComparisonOperator::LessEqual => self.add_instruction(OpCode::CmpLEq),
-                        ComparisonOperator::Equal => self.add_instruction(OpCode::CmpEq),
-                        ComparisonOperator::NotEqual => self.add_instruction(OpCode::CmpNEq),
-                        ComparisonOperator::GreaterEqual => self.add_instruction(OpCode::CmpGEq),
-                        ComparisonOperator::Greater => self.add_instruction(OpCode::CmpGreater),
+                        ComparisonOperator::Less => self.emit_code(OpCode::CmpLess),
+                        ComparisonOperator::LessEqual => self.emit_code(OpCode::CmpLEq),
+                        ComparisonOperator::Equal => self.emit_code(OpCode::CmpEq),
+                        ComparisonOperator::NotEqual => self.emit_code(OpCode::CmpNEq),
+                        ComparisonOperator::GreaterEqual => self.emit_code(OpCode::CmpGEq),
+                        ComparisonOperator::Greater => self.emit_code(OpCode::CmpGreater),
                     }
                     Ok(())
                 }
@@ -266,12 +319,11 @@ impl<'a> Compiler<'a> {
                     self.expression(*lhs)?;
                     self.expression(*rhs)?;
                     match boolean {
-                        BooleanOperator::And => self.add_instruction(OpCode::CmpAnd),
-                        BooleanOperator::Or => self.add_instruction(OpCode::CmpOr),
+                        BooleanOperator::And => self.emit_code(OpCode::CmpAnd),
+                        BooleanOperator::Or => self.emit_code(OpCode::CmpOr),
                     }
                     Ok(())
                 }
-                Operation::Binary(_) => todo!(),
             },
             Expression::Array(array) => {
                 let len = array.len();
@@ -281,7 +333,7 @@ impl<'a> Compiler<'a> {
                 for expression in array {
                     self.expression(expression)?;
                 }
-                self.add_instruction(OpCode::CreateList(len as InitLen));
+                self.emit_code(OpCode::CreateList(len as InitLen));
                 Ok(())
             }
             Expression::Table(table) => {
@@ -293,76 +345,52 @@ impl<'a> Compiler<'a> {
                     self.expression(entry.key)?;
                     self.expression(entry.value)?;
                 }
-                self.add_instruction(OpCode::CreateTable(len as InitLen));
+                self.emit_code(OpCode::CreateTable(len as InitLen));
                 Ok(())
             }
             Expression::Literal(literal) => self.literal(literal),
             Expression::Block(block) => {
-                let num_exprs = block.len();
-                for (i, expression) in block.into_iter().enumerate() {
-                    let should_pop = match &expression {
-                        Statement::Let { .. } => false,
-                        Statement::Expression(Expression::Operation { operation, .. })
-                            if operation == &Operation::Assignment =>
-                        {
-                            false
-                        }
-                        Statement::Function { .. } => false,
-                        _ => true,
-                    };
-                    self.statement(expression)?;
-                    if i != num_exprs - 1 && should_pop {
-                        let resolver = &self.states.last().unwrap().resolver;
-                        if resolver.locals[resolver.num_locals() - 1].is_captured {
-                            self.add_instruction(OpCode::CloseUpvalue);
-                        } else {
-                            self.add_instruction(OpCode::Pop);
-                        }
-                    } else if i == num_exprs - 1 {
-                        let n = self.end_scope();
-                        /*for _ in 0..n {
-                            let resolver = &self.states.last().unwrap().resolver;
-                            if resolver.locals.is_empty() {
-                                break;
-                            }
-                            if resolver.locals[resolver.num_locals() - 1].is_captured {
-                                self.add_instruction(OpCode::CloseUpvalue);
-                            } else {
-                                self.add_instruction(OpCode::Pop);
-                            }
-                        }*/
-                        if !should_pop {
-                            self.add_instruction(OpCode::LoadUnit);
-                        }
+                self.begin_scope();
+                let block_len = block.len() - 1;
+                for (i, statement) in block.into_iter().enumerate() {
+                    let pop = matches!(statement, Statement::Expression(Expression::Call { .. }));
+                    let is_assignment = matches!(
+                        statement,
+                        Statement::Expression(Expression::Operation {
+                            operation: Operation::Assignment,
+                            ..
+                        })
+                    );
+                    self.statement(statement)?;
+                    if i < block_len && pop {
+                        self.emit_code(OpCode::Pop);
+                    }
+                    if i == block_len && is_assignment {
+                        self.emit_code(OpCode::LoadUnit);
                     }
                 }
+                self.end_scope();
                 Ok(())
             }
             Expression::Path { ident, parts } => {
                 let (getter, _) = self.resolve_name(&ident)?;
-                let num_parts = parts.len();
-                if let OpCode::GetLocal(local) = getter {
-                    if num_parts > 0
-                        && !self
-                            .state_mut()
-                            .resolver
-                            .local(local as usize)
-                            .is_initialized
-                    {
-                        return Err(CompilerError::CannotUseUnitializedLocal);
-                    }
-                }
-                self.add_instruction(getter);
+                self.emit_code(getter);
                 for part in parts {
                     match part {
-                        PathPart::Ident(ident) => {
-                            self.constant(Value::String(Rc::new(ident)))?;
-                        }
+                        PathPart::Ident(ident) => match getter {
+                            OpCode::GetModule(i) => self.constant(Value::Integer(
+                                self.modules[i as usize]
+                                    .local(&ident)
+                                    .ok_or(CompilerError::LocalNotFound(ident))?
+                                    as i64,
+                            ))?,
+                            _ => self.constant(Value::String(Rc::new(ident)))?,
+                        },
                         PathPart::Index(expression) => {
                             self.expression(expression)?;
                         }
                     }
-                    self.add_instruction(OpCode::GetTable);
+                    self.emit_code(OpCode::GetTable);
                 }
                 Ok(())
             }
@@ -375,12 +403,11 @@ impl<'a> Compiler<'a> {
                 for arg in args {
                     self.expression(arg)?;
                 }
-                self.add_instruction(OpCode::Call(num_args as u8));
+                self.emit_code(OpCode::Call(num_args as u8));
                 Ok(())
             }
             Expression::Function { args, expr } => {
-                let index = self.states.len();
-                let func_name = format!("<anonymous`{index}>");
+                let func_name = format!("<anonymous>");
                 self.function(func_name, args, *expr)?;
                 Ok(())
             }
@@ -390,40 +417,32 @@ impl<'a> Compiler<'a> {
                 r#else,
             } => {
                 self.expression(*condition)?;
-                self.begin_scope();
-                let then_location = self.state().prototype.code.len();
-                self.add_instruction(OpCode::JumpIfFalse(0));
+                let then_location = self.emit_jump(OpCode::JumpIfFalse(0));
                 self.expression(*block)?;
-                let else_location = self.state().prototype.code.len();
-                let diff = (else_location - then_location) as u8;
-                match self.state_mut().prototype.code[then_location] {
-                    OpCode::JumpIfFalse(ref mut l) => *l = diff,
-                    _ => unreachable!(),
-                }
+                let else_location = self.emit_jump(OpCode::Jump(0));
+                self.patch_jump(then_location);
                 if let Some(r#else) = r#else {
-                    self.begin_scope();
-                    self.add_instruction(OpCode::Jump(0));
                     self.expression(*r#else)?;
                 } else {
-                    self.add_instruction(OpCode::LoadUnit);
+                    self.emit_code(OpCode::LoadUnit);
                 }
-                let else_end = self.state().prototype.code.len();
-                let diff = (else_end - else_location) as u8 - 1;
-                match self.state_mut().prototype.code[else_location] {
-                    OpCode::Jump(ref mut l) => *l = diff,
-                    _ => unreachable!(),
-                }
+                self.patch_jump(else_location);
                 Ok(())
             }
             Expression::InterpolatedString { format, arguments } => {
+                self.constant(Value::String(Rc::new("format".to_string())))?;
                 self.constant(Value::String(Rc::new(format)))?;
-                let instruction = OpCode::CreateList(arguments.len() as u8 + 1);
+                let instruction = OpCode::CreateList(arguments.len() as u8);
+                self.constant(Value::String(Rc::new("args".to_string())))?;
                 for arg in arguments {
+                    self.constant(Value::String(Rc::new("arg".to_string())))?;
                     self.expression(arg.expression)?;
+                    self.constant(Value::String(Rc::new("offset".to_string())))?;
                     self.constant(Value::Integer(arg.offset as i64))?;
-                    self.add_instruction(OpCode::CreateList(2));
+                    self.emit_code(OpCode::CreateTable(2));
                 }
-                self.add_instruction(instruction);
+                self.emit_code(instruction);
+                self.emit_code(OpCode::CreateTable(2));
                 Ok(())
             }
         }
@@ -467,7 +486,7 @@ impl<'a> Compiler<'a> {
             }
             _ => return Err(CompilerError::NotAValidConstant),
         };
-        self.add_instruction(instruction);
+        self.emit_code(instruction);
         Ok(())
     }
 
@@ -486,20 +505,23 @@ impl<'a> Compiler<'a> {
         args: Vec<String>,
         expression: Expression,
     ) -> Result<(), CompilerError> {
-        let index = self.states.len();
-        self.states.push(CompilerState::new(ident.clone()));
-        let previous_index = self.current_state;
-        self.current_state = index;
-        self.state_mut().resolver.depth = self.states[previous_index].resolver.depth;
-        self.state_mut().resolver.begin_scope();
-        self.state_mut().resolver.add_local(ident.clone())?;
+        let index = self.state().defined_states.len();
+        let new_state = Rc::new(RefCell::new(
+            CompilerState::new(ident.clone())
+                .with_depth(self.state().resolver.depth)
+                .with_parent(self.state.clone()),
+        ));
+        self.state_mut().defined_states.push(new_state.clone());
+        self.state = new_state;
+        self.begin_scope();
+        self.add_local(ident.clone())?;
 
         if args.is_empty() {
-            self.state_mut().resolver.add_local("".to_string())?;
+            self.add_local("".to_string())?;
             self.state_mut().prototype.num_args += 1;
         } else {
             for arg in args {
-                self.state_mut().resolver.add_local(arg)?;
+                self.add_local(arg)?;
                 self.state_mut().prototype.num_args += 1;
                 if self.state_mut().prototype.num_args > u8::MAX as usize {
                     return Err(CompilerError::MaxNumberOfArgsExceeded);
@@ -509,33 +531,34 @@ impl<'a> Compiler<'a> {
 
         self.expression(expression)?;
         self.end_scope();
-        self.add_instruction(OpCode::Return);
-        self.current_state = previous_index;
-        self.add_instruction(OpCode::Closure(index as FunctionIdx));
+        let old_state = self.state().parent.clone().unwrap();
+        self.state = old_state;
+        self.emit_code(OpCode::Return);
+        self.emit_code(OpCode::Closure(index as FunctionIdx));
 
         Ok(())
     }
 
-    fn compile_assignment(
-        &mut self,
-        lhs: Expression,
-        rhs: Expression,
-    ) -> Result<(), CompilerError> {
+    fn add_local(&mut self, ident: String) -> Result<usize, CompilerError> {
+        let index = self.state_mut().resolver.add_local(ident)?;
+        let local = self.state().resolver.local(index).clone();
+        self.state_mut().prototype.add_local(local);
+        Ok(index)
+    }
+
+    fn assignment(&mut self, lhs: Expression, rhs: Expression) -> Result<(), CompilerError> {
         match lhs {
             Expression::Path { ident, parts } => {
                 let (getter, setter) = self.resolve_name(&ident)?;
                 if parts.is_empty() {
                     self.expression(rhs)?;
-                    if let Some(OpCode::SetLocal(local)) = setter {
-                        self.state_mut().resolver.mark_initialized(local as usize);
-                    }
                     if let Some(setter) = setter {
-                        self.add_instruction(setter);
+                        self.emit_code(setter);
                     } else {
                         return Err(CompilerError::CannotSetTheValueOfAModule);
                     }
                 } else {
-                    self.add_instruction(getter);
+                    self.emit_code(getter);
                     let num_parts = parts.len();
                     for (i, part) in parts.into_iter().enumerate() {
                         match part {
@@ -547,11 +570,11 @@ impl<'a> Compiler<'a> {
                             }
                         }
                         if i < num_parts - 1 {
-                            self.add_instruction(OpCode::GetTable);
+                            self.emit_code(OpCode::GetTable);
                         }
                     }
                     self.expression(rhs)?;
-                    self.add_instruction(OpCode::SetTable);
+                    self.emit_code(OpCode::SetTable);
                 }
             }
             _ => todo!(),
@@ -561,15 +584,30 @@ impl<'a> Compiler<'a> {
 
     fn resolve_name(&mut self, ident: &str) -> Result<(OpCode, Option<OpCode>), CompilerError> {
         if let Some(local) = self.state().resolver.resolve_local(&ident) {
-            Ok((
-                OpCode::GetLocal(local as LocalIdx),
-                Some(OpCode::SetLocal(local as LocalIdx)),
-            ))
-        } else if let Some(upvalue) = self.resolve_upvalue(&ident, self.states.len() - 1) {
-            Ok((
-                OpCode::GetUpvalue(upvalue as LocalIdx),
-                Some(OpCode::SetUpvalue(upvalue as LocalIdx)),
-            ))
+            if self.state().resolver.local(local).depth == 0 {
+                Ok((
+                    OpCode::GetModuleValue(local as LocalIdx),
+                    Some(OpCode::SetModuleValue(local as LocalIdx)),
+                ))
+            } else {
+                Ok((
+                    OpCode::GetLocal(local as LocalIdx),
+                    Some(OpCode::SetLocal(local as LocalIdx)),
+                ))
+            }
+        } else if let Some(index) = self.resolve_upvalue(&ident) {
+            let (upvalue, local) = self.get_upvalue_local(index);
+            if local.depth == 0 {
+                Ok((
+                    OpCode::GetModuleValue(upvalue.index as LocalIdx),
+                    Some(OpCode::SetModuleValue(upvalue.index as LocalIdx)),
+                ))
+            } else {
+                Ok((
+                    OpCode::GetUpvalue(index as LocalIdx),
+                    Some(OpCode::SetUpvalue(index as LocalIdx)),
+                ))
+            }
         } else if let Some(module) = self.resolve_module(&ident) {
             Ok((OpCode::GetModule(module as LocalIdx), None))
         } else {
@@ -577,58 +615,58 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn resolve_upvalue(&mut self, ident: &str, depth: usize) -> Option<usize> {
-        if depth == 0 {
-            return None;
+    fn resolve_module(&self, ident: &str) -> Option<usize> {
+        self.modules.iter().position(|m| m.ident == ident)
+    }
+
+    fn get_upvalue_local(&self, index: usize) -> (&Upvalue, &Local) {
+        todo!()
+    }
+
+    fn resolve_upvalue(&self, ident: &str) -> Option<usize> {
+        let parent = self.state().parent.clone()?;
+        let local = parent.borrow().resolver.resolve_local(ident);
+        if let Some(local) = local {
+            parent.borrow_mut().resolver.mark_captured(local);
+            return self.add_upvalue(local, true);
         }
 
-        let state = self
-            .states
-            .iter_mut()
-            .rev()
-            .find(|s| s.resolver.depth <= depth)?;
-
-        if let Some(local) = state.resolver.resolve_local(ident) {
-            state.resolver.mark_captured(local);
-            return self.add_upvalue(depth, local, true);
-        }
-
-        if let Some(upvalue) = self.resolve_upvalue(ident, depth - 1) {
-            return self.add_upvalue(depth, upvalue, false);
+        if let Some(upvalue) = self.resolve_upvalue(ident) {
+            return self.add_upvalue(upvalue, false);
         }
 
         None
     }
 
-    fn resolve_module(&self, ident: &str) -> Option<usize> {
-        self.modules.iter().position(|m| m.ident == ident)
-    }
-
-    fn add_upvalue(&mut self, depth: usize, index: usize, is_local: bool) -> Option<usize> {
-        let state = &mut self.states[depth];
-        if let Some((i, _)) = state
+    fn add_upvalue(&self, index: usize, is_local: bool) -> Option<usize> {
+        let i = self
+            .state()
+            .prototype
             .upvalues
             .iter()
             .enumerate()
             .find(|(_, u)| u.index == index && u.is_local == is_local)
-        {
+            .map(|(i, _)| i);
+        if let Some(i) = i {
             Some(i)
         } else {
-            let upvalue_index = state.upvalues.len();
-            state.upvalues.push(Upvalue { index, is_local });
-            self.states[depth].prototype.upvalues += 1;
+            let upvalue_index = self.state().prototype.upvalues.len();
+            self.state_mut()
+                .prototype
+                .upvalues
+                .push(Upvalue { index, is_local });
             Some(upvalue_index)
         }
     }
 
     fn compile_arithmetic_operator(&mut self, operator: ArithmeticOperator) {
         match operator {
-            ArithmeticOperator::Add => self.add_instruction(OpCode::Add),
-            ArithmeticOperator::Subtract => self.add_instruction(OpCode::Subtract),
-            ArithmeticOperator::Divide => self.add_instruction(OpCode::Divide),
-            ArithmeticOperator::IDivide => self.add_instruction(OpCode::IDivide),
-            ArithmeticOperator::Multiply => self.add_instruction(OpCode::Multiply),
-            ArithmeticOperator::Modulus => self.add_instruction(OpCode::Modulus),
+            ArithmeticOperator::Add => self.emit_code(OpCode::Add),
+            ArithmeticOperator::Subtract => self.emit_code(OpCode::Subtract),
+            ArithmeticOperator::Divide => self.emit_code(OpCode::Divide),
+            ArithmeticOperator::IDivide => self.emit_code(OpCode::IDivide),
+            ArithmeticOperator::Multiply => self.emit_code(OpCode::Multiply),
+            ArithmeticOperator::Modulus => self.emit_code(OpCode::Modulus),
         }
     }
 
@@ -637,19 +675,43 @@ impl<'a> Compiler<'a> {
     }
 
     fn end_scope(&mut self) -> usize {
-        self.state_mut().resolver.end_scope()
+        let size = self.state().resolver.num_locals_defined_in_scope();
+        let num_locals = self.state().resolver.num_locals();
+        for i in 0..size {
+            if self.state().resolver.locals[num_locals - 1 - i].is_captured {
+                self.emit_code(OpCode::CloseUpvalue((num_locals - 1 - i) as u8));
+            }
+        }
+        self.state_mut().resolver.end_scope();
+        size
     }
 
-    fn add_instruction(&mut self, op_code: OpCode) {
-        let line = self.parser.lexer().line();
+    fn emit_jump(&mut self, op_code: OpCode) -> usize {
+        let index = self.state().prototype.code.len();
+        self.emit_code(op_code);
+        index
+    }
+
+    fn patch_jump(&mut self, index: usize) {
+        let len = self.state().prototype.code.len() - 1 - index;
+        let code = &mut self.state_mut().prototype.code[index];
+        match code {
+            OpCode::Jump(ref mut index) => *index = len as u8,
+            OpCode::JumpIfFalse(ref mut index) => *index = len as u8,
+            _ => unreachable!(),
+        }
+    }
+
+    fn emit_code(&mut self, op_code: OpCode) {
+        let line = self.parser.last_expr_line();
         self.state_mut().prototype.push_op_code(op_code, line);
     }
 
     pub fn dump(&self) -> String {
         let mut buffer = BufWriter::new(Vec::new());
-        for (i, state) in self.states.iter().enumerate() {
+        for (i, state) in self.state().defined_states.iter().enumerate() {
             write!(buffer, "{i}: ").unwrap();
-            state.dump(&mut buffer);
+            state.borrow().dump(&mut buffer);
         }
         String::from_utf8(buffer.into_inner().unwrap()).unwrap()
     }

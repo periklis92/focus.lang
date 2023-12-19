@@ -1,23 +1,57 @@
+use std::{io::Write, rc::Rc};
+
 use crate::{
+    compiler::Upvalue,
     op::{ConstIdx, OpCode},
-    value::Value,
+    value::{Closure, NativeFunction, Value},
+    vm::Vm,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+pub struct Local {
+    pub ident: String,
+    pub depth: usize,
+    pub is_captured: bool,
+}
+
+#[derive(Debug, PartialEq)]
 pub struct ModuleLocal {
     pub ident: String,
     pub value: Value,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Module {
     pub ident: String,
-    pub locals: Vec<ModuleLocal>,
+    pub locals: Vec<String>,
+    pub prototypes: Vec<Prototype>,
+    pub is_executed: bool,
 }
 
 impl Module {
+    pub fn new(name: &str) -> Self {
+        Self {
+            ident: name.to_string(),
+            locals: Vec::new(),
+            prototypes: Vec::new(),
+            is_executed: false,
+        }
+    }
+
+    pub fn add_local(&mut self, ident: &str) {
+        self.locals.push(ident.to_string());
+    }
+
     pub fn local(&self, ident: &str) -> Option<usize> {
-        self.locals.iter().position(|l| l.ident == ident)
+        self.locals.iter().position(|l| l == ident)
+    }
+
+    pub fn dump(&self, buf: &mut impl Write) -> Result<(), std::io::Error> {
+        for (i, proto) in self.prototypes.iter().enumerate() {
+            write!(buf, "{i}: ")?;
+            proto.dump(buf)?;
+        }
+        Ok(())
     }
 }
 
@@ -28,13 +62,28 @@ pub struct Name {
 }
 
 #[derive(Debug, Clone)]
+pub struct DebugInfo {
+    pub locals: Vec<Local>,
+    pub lines: Vec<usize>,
+}
+
+impl DebugInfo {
+    pub fn new() -> Self {
+        Self {
+            locals: Vec::new(),
+            lines: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Prototype {
     pub code: Vec<OpCode>,
     pub constants: Vec<Value>,
     pub ident: String,
-    pub lines: Vec<usize>,
     pub num_args: usize,
-    pub upvalues: usize,
+    pub debug_info: DebugInfo,
+    pub upvalues: Vec<Upvalue>,
 }
 
 impl Prototype {
@@ -43,9 +92,9 @@ impl Prototype {
             code: Vec::new(),
             constants: Vec::new(),
             ident,
-            lines: Vec::new(),
             num_args: 0,
-            upvalues: 0,
+            upvalues: Vec::new(),
+            debug_info: DebugInfo::new(),
         }
     }
 
@@ -53,12 +102,12 @@ impl Prototype {
         &self.ident
     }
     pub fn line(&self, index: usize) -> usize {
-        self.lines[index]
+        self.debug_info.lines[index]
     }
 
     pub fn push_op_code(&mut self, op_code: OpCode, line: usize) {
         self.code.push(op_code);
-        self.lines.push(line);
+        self.debug_info.lines.push(line);
     }
 
     pub fn op_codes(&self) -> &[OpCode] {
@@ -77,12 +126,47 @@ impl Prototype {
         }
     }
 
+    pub fn add_local(&mut self, local: Local) {
+        self.debug_info.locals.push(local);
+    }
+
     pub fn constant(&self, index: usize) -> &Value {
         &self.constants[index]
     }
 
     pub fn constants(&self) -> &[Value] {
         &self.constants
+    }
+
+    pub fn dump(&self, buf: &mut impl Write) -> Result<(), std::io::Error> {
+        writeln!(buf, "fn {}", self.ident())?;
+
+        let mut last_line = 0;
+        for (i, op) in self.op_codes().iter().enumerate() {
+            let line = self.line(i);
+            if last_line < line + 1 {
+                last_line = line + 1;
+                writeln!(buf, "{last_line}:")?;
+            }
+            writeln!(buf, " {op}")?;
+        }
+
+        writeln!(buf, "\nLocals:").unwrap();
+        for (i, l) in self.debug_info.locals.iter().enumerate() {
+            writeln!(buf, "{i}: ident: {}, depth: {}", l.ident, l.depth).unwrap();
+        }
+
+        writeln!(buf, "\nUpvalues:").unwrap();
+        for (i, u) in self.upvalues.iter().enumerate() {
+            writeln!(buf, "{i}: index: {} is_local: {}", u.index, u.is_local).unwrap();
+        }
+
+        writeln!(buf, "\nConstants:").unwrap();
+        for (i, c) in self.constants().iter().enumerate() {
+            writeln!(buf, "{i}: {c}").unwrap();
+        }
+        writeln!(buf)?;
+        Ok(())
     }
 }
 

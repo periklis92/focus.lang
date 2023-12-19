@@ -34,18 +34,21 @@ fn main() -> Result<(), RunCliError> {
     let mut compiler = Compiler::new(&source);
     compiler.add_module(stdlib::string::module());
     compiler.add_module(stdlib::io::module());
-    let result = compiler.compile();
-    match result {
-        Ok(()) => {}
-        Err(CompilerError::ParserError(ParserError::EndOfSource)) => {}
-        Err(err) => return Err(err.into()),
-    }
+    compiler.add_module(stdlib::iter::module());
+    let module = compiler.compile_module("<main>")?;
 
     let mut out = File::create(Path::new(&input_filename).with_extension("flb"))
         .map_err(RunCliError::FileError)?;
-    write!(out, "{}", compiler.dump()).map_err(RunCliError::ReadWriteError)?;
-    let mut interpreter = Vm::new(compiler.states).with_modules(compiler.modules);
-    interpreter.interpret();
+    module
+        .dump(&mut out)
+        .map_err(|e| RunCliError::ReadWriteError(e))?;
+
+    let mut interpreter = Vm::new().with_modules(vec![
+        stdlib::string::module(),
+        stdlib::io::module(),
+        stdlib::iter::module(),
+    ]);
+    interpreter.execute_module(module, "main");
     let last_value = interpreter.stack().last().unwrap();
     println!("{last_value}");
 

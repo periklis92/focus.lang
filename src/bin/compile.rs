@@ -1,8 +1,8 @@
-use std::{fs::File, io::Write};
+use std::{fs::File, path::Path};
 
 use focus_third::{
     compiler::{Compiler, CompilerError},
-    parser::ParserError,
+    stdlib,
 };
 
 #[derive(Debug)]
@@ -26,19 +26,19 @@ fn main() -> Result<(), CompileCliError> {
     };
 
     let source =
-        std::io::read_to_string(File::open(input_filename).map_err(CompileCliError::FileError)?)
+        std::io::read_to_string(File::open(&input_filename).map_err(CompileCliError::FileError)?)
             .map_err(CompileCliError::ReadWriteError)?;
     let mut compiler = Compiler::new(&source);
-    let result = compiler.compile();
-    match result {
-        Ok(()) => {}
-        Err(CompilerError::ParserError(ParserError::EndOfSource)) => {}
-        Err(err) => return Err(err.into()),
-    }
-    let mut out = File::create("out.flb").map_err(CompileCliError::FileError)?;
-    write!(out, "{}", compiler.dump()).map_err(CompileCliError::ReadWriteError)?;
-    /*out.write_fmt(format_args!("{}", compiler.proto()))
-    .map_err(CompileCliError::ReadWriteError)?;*/
+    // compiler.add_module(stdlib::string::module());
+    // compiler.add_module(stdlib::io::module());
+    // compiler.add_module(stdlib::iter::module());
+    let module = compiler.compile_module("main")?;
+
+    let mut out = File::create(Path::new(&input_filename).with_extension("flb"))
+        .map_err(CompileCliError::FileError)?;
+    module
+        .dump(&mut out)
+        .map_err(|e| CompileCliError::ReadWriteError(e))?;
 
     Ok(())
 }

@@ -10,11 +10,12 @@ pub type Table = HashMap<Value, Value>;
 pub type StringRef = Rc<String>;
 pub type TableRef = Rc<RefCell<Table>>;
 pub type PrototypeRef = Rc<Prototype>;
-pub type FunctionRef = Rc<NativeFunction>;
+pub type NativeFunctionRef = Rc<NativeFunction>;
 pub type UpvalueRef = Rc<RefCell<Upvalue>>;
 pub type ClosureRef = Rc<Closure>;
 pub type ArrayRef = Rc<RefCell<Vec<Value>>>;
 pub type ModuleRef = Rc<Module>;
+pub type UserDataRef = Rc<dyn std::any::Any>;
 
 #[derive(Debug, PartialEq)]
 pub enum Upvalue {
@@ -24,7 +25,7 @@ pub enum Upvalue {
 
 #[derive(Debug)]
 pub struct NativeFunction {
-    pub ident: &'static str,
+    pub ident: String,
     pub function: fn(&mut Vm) -> Value,
 }
 
@@ -35,19 +36,56 @@ impl PartialEq for NativeFunction {
 }
 
 #[derive(Debug, PartialEq)]
+pub enum Function {
+    Prototype(PrototypeRef),
+    Native(NativeFunctionRef),
+}
+
+impl Function {
+    pub fn ident(&self) -> &str {
+        match self {
+            Function::Prototype(prototype) => &prototype.ident,
+            Function::Native(native) => &native.ident,
+        }
+    }
+
+    pub fn prototype(&self) -> Option<PrototypeRef> {
+        match self {
+            Function::Prototype(prototype) => Some(prototype.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn native(&self) -> Option<NativeFunctionRef> {
+        match self {
+            Function::Native(native) => Some(native.clone()),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
 pub struct Closure {
-    pub function: PrototypeRef,
+    pub function: Function,
     pub upvalues: Vec<UpvalueRef>,
     pub num_upvalues: usize,
 }
 
 impl Closure {
-    pub fn new(function: PrototypeRef) -> Self {
-        let upvalues = function.upvalues as usize;
+    pub fn from_prototype(function: PrototypeRef) -> Self {
+        let num_upvalues = function.upvalues.len();
         Self {
-            function,
-            upvalues: Vec::with_capacity(upvalues),
-            num_upvalues: upvalues,
+            function: Function::Prototype(function),
+            upvalues: Vec::with_capacity(num_upvalues),
+            num_upvalues: num_upvalues,
+        }
+    }
+
+    pub fn from_native(function: NativeFunctionRef) -> Self {
+        Self {
+            function: Function::Native(function),
+            upvalues: Vec::new(),
+            num_upvalues: 0,
         }
     }
 }
@@ -60,10 +98,10 @@ pub enum Value {
     Number(f64),
     String(StringRef),
     Table(TableRef),
-    Function(FunctionRef),
     Closure(ClosureRef),
     Array(ArrayRef),
     Module(ModuleRef),
+    UserData(UserDataRef),
 }
 
 impl Value {
@@ -71,6 +109,13 @@ impl Value {
         match self {
             Value::Unit | Value::Bool(false) | Value::Integer(0) => true,
             _ => false,
+        }
+    }
+
+    pub fn as_user_data(self) -> Option<UserDataRef> {
+        match self {
+            Value::UserData(user_data) => Some(user_data),
+            _ => None,
         }
     }
 
@@ -88,9 +133,23 @@ impl Value {
         }
     }
 
+    pub fn as_table(self) -> Option<TableRef> {
+        match self {
+            Value::Table(table) => Some(table),
+            _ => None,
+        }
+    }
+
     pub fn as_int(self) -> Option<i64> {
         match self {
             Value::Integer(integer) => Some(integer),
+            _ => None,
+        }
+    }
+
+    pub fn as_closure(self) -> Option<ClosureRef> {
+        match self {
+            Value::Closure(closure) => Some(closure),
             _ => None,
         }
     }
@@ -104,9 +163,10 @@ impl PartialEq for Value {
             (Self::Number(l0), Self::Number(r0)) => l0 == r0,
             (Self::String(l0), Self::String(r0)) => l0 == r0,
             (Self::Table(l0), Self::Table(r0)) => l0 == r0,
-            (Self::Function(l0), Self::Function(r0)) => l0 == r0,
             (Self::Closure(l0), Self::Closure(r0)) => l0 == r0,
             (Self::Array(l0), Self::Array(r0)) => l0 == r0,
+            (Self::Module(l0), Self::Module(r0)) => l0 == r0,
+            (Self::UserData(l0), Self::UserData(r0)) => Rc::as_ptr(l0) == Rc::as_ptr(r0),
             _ => core::mem::discriminant(self) == core::mem::discriminant(other),
         }
     }
@@ -136,10 +196,10 @@ impl Hash for Value {
             Value::Number(num) => num.to_bits().hash(state),
             Value::String(str) => str.hash(state),
             Value::Table(table) => Rc::as_ptr(table).hash(state),
-            Value::Function(function) => Rc::as_ptr(function).hash(state),
             Value::Closure(closure) => Rc::as_ptr(closure).hash(state),
             Value::Array(array) => Rc::as_ptr(array).hash(state),
             Value::Module(module) => Rc::as_ptr(module).hash(state),
+            Value::UserData(user_data) => Rc::as_ptr(user_data).hash(state),
         }
     }
 }
@@ -160,9 +220,6 @@ impl Display for Value {
                 write!(f, "}}")?;
                 Ok(())
             }
-            Value::Function(function) => {
-                write!(f, "fn {}: {:x?}", function.ident, function.function)
-            }
             Value::Closure(closure) => write!(
                 f,
                 "fn {}: {:x?}",
@@ -179,6 +236,9 @@ impl Display for Value {
             }
             Value::Module(module) => {
                 write!(f, "mod {}: {:x?}", module.ident, Rc::as_ptr(module))
+            }
+            Value::UserData(user_data) => {
+                write!(f, "user_data: {:x?}", Rc::as_ptr(user_data))
             }
         }
     }
