@@ -1,9 +1,6 @@
 use std::{fs::File, path::Path};
 
-use focus_third::{
-    compiler::{Compiler, CompilerError},
-    stdlib,
-};
+use focus_third::compiler::{Compiler, CompilerError};
 
 #[derive(Debug)]
 enum CompileCliError {

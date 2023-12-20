@@ -42,7 +42,11 @@ fn format_to_string(args: TableRef) -> String {
 pub mod string {
     use std::rc::Rc;
 
-    use crate::{state::Module, value::Value, vm::Vm};
+    use crate::{
+        state::{Module, NativeModuleBuilder},
+        value::Value,
+        vm::Vm,
+    };
 
     use super::format_to_string;
 
@@ -56,15 +60,20 @@ pub mod string {
     }
 
     pub fn module() -> Module {
-        // Module::new("String").with_function("from_format", from_format)
-        todo!()
+        NativeModuleBuilder::new("String")
+            .with_function("from_format", from_format)
+            .build()
     }
 }
 
 pub mod io {
     use std::{cell::RefCell, io::Read, rc::Rc};
 
-    use crate::{state::Module, value::Value, vm::Vm};
+    use crate::{
+        state::{Module, NativeModuleBuilder},
+        value::Value,
+        vm::Vm,
+    };
 
     use super::format_to_string;
 
@@ -135,19 +144,23 @@ pub mod io {
     }
 
     pub fn module() -> Module {
-        // Module::new("IO")
-        //     .with_function("print", print)
-        //     .with_function("printf", printf)
-        //     .with_function("open_file", open_file)
-        //     .with_function("read_file", read_file)
-        todo!()
+        NativeModuleBuilder::new("Io")
+            .with_function("print", print)
+            .with_function("printf", printf)
+            .with_function("open_file", open_file)
+            .with_function("read_file", read_file)
+            .build()
     }
 }
 
 pub mod iter {
     use std::{cell::RefCell, rc::Rc};
 
-    use crate::{state::Module, value::Value, vm::Vm};
+    use crate::{
+        state::{Module, NativeModuleBuilder},
+        value::Value,
+        vm::Vm,
+    };
 
     fn map(vm: &mut Vm) -> Value {
         if vm.top() != 2 {
@@ -168,7 +181,8 @@ pub mod iter {
     }
 
     pub fn module() -> Module {
-        // Module::new("Iter").with_function("map", map)
-        todo!()
+        NativeModuleBuilder::new("Iter")
+            .with_function("map", map)
+            .build()
     }
 }

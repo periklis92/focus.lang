@@ -1,5 +1,5 @@
 use std::{
-    cell::{RefCell, RefMut},
+    cell::{Ref, RefCell, RefMut},
     io::{BufWriter, Write},
     rc::Rc,
 };
@@ -11,22 +11,15 @@ use crate::{
     },
     op::{FunctionIdx, InitLen, LocalIdx, OpCode},
     parser::{Parser, ParserError},
-    state::{Local, Module, Prototype},
+    state::{Local, Module, ModuleValue, Prototype, Upvalue},
     value::Value,
 };
-
-#[derive(Debug, Clone)]
-pub struct Upvalue {
-    pub index: usize,
-    pub is_local: bool,
-}
 
 #[derive(Debug)]
 pub struct ScopeResolver {
     locals: Vec<Local>,
     depth: usize,
     base_depth: usize,
-    parent_scope: Option<usize>,
 }
 
 impl ScopeResolver {
@@ -35,23 +28,13 @@ impl ScopeResolver {
             locals: Vec::new(),
             depth: 0,
             base_depth: 0,
-            parent_scope: None,
         }
-    }
-
-    pub fn with_parent(mut self, parent: usize) -> Self {
-        self.parent_scope = Some(parent);
-        self
     }
 
     pub fn with_depth(mut self, depth: usize) -> Self {
         self.depth = depth;
         self.base_depth = depth;
         self
-    }
-
-    pub fn parent(&self) -> Option<usize> {
-        self.parent_scope
     }
 
     pub fn begin_scope(&mut self) {
@@ -129,11 +112,11 @@ pub struct CompilerState {
 }
 
 impl CompilerState {
-    pub fn new(ident: String) -> Self {
+    pub fn new(ident: String, is_anonymous: bool) -> Self {
         Self {
             parent: None,
             resolver: ScopeResolver::new(),
-            prototype: Prototype::new(ident),
+            prototype: Prototype::new(ident, is_anonymous),
             defined_states: Vec::new(),
         }
     }
@@ -146,6 +129,15 @@ impl CompilerState {
     pub fn with_parent(mut self, parent: Rc<RefCell<CompilerState>>) -> Self {
         self.parent = Some(parent);
         self
+    }
+
+    fn build_prototype(&self) -> Rc<Prototype> {
+        let mut proto = self.prototype.clone();
+        for state in &self.defined_states {
+            let child_proto = state.borrow().build_prototype();
+            proto.prototypes.push(child_proto);
+        }
+        Rc::new(proto)
     }
 
     fn dump(&self, w: &mut impl Write) {
@@ -182,18 +174,17 @@ impl CompilerState {
 pub struct Compiler<'a> {
     pub state: Rc<RefCell<CompilerState>>,
     pub parser: Parser<'a>,
-    pub current_state: usize,
     pub modules: Vec<Module>,
+    pub module_locals: Vec<String>,
 }
 
 impl<'a> Compiler<'a> {
     pub fn new(source: &'a str) -> Self {
-        // Rc::new(RefCell::new(CompilerState))
         Self {
-            state: Rc::new(RefCell::new(CompilerState::new("<main>".to_string()))),
+            state: Rc::new(RefCell::new(CompilerState::new("<main>".to_string(), true))),
             parser: Parser::new(source),
-            current_state: 0,
             modules: Vec::new(),
+            module_locals: Vec::new(),
         }
     }
 
@@ -210,27 +201,46 @@ impl<'a> Compiler<'a> {
     }
 
     pub fn compile_module(mut self, ident: &str) -> Result<Module, CompilerError> {
-        let mut module = Module::new(ident);
+        let mut statements = Vec::new();
         loop {
-            let expr = self.parser.parse();
-            match expr {
-                Ok(Statement::Import { source, imports }) => todo!(),
+            let statement = self.parser.parse();
+            match statement {
+                Ok(Statement::Import { source, imports }) => {
+                    return Err(CompilerError::NotImplemented);
+                }
                 Ok(Statement::Let { ref ident, .. }) => {
-                    module.add_local(ident);
-                    self.statement(expr.unwrap())?;
+                    self.add_local(ident.to_string())?;
+                    statements.push(statement.unwrap());
                 }
                 Ok(Statement::Function { ref ident, .. }) => {
-                    module.add_local(ident);
-                    self.statement(expr.unwrap())?;
+                    self.add_local(ident.to_string())?;
+                    statements.push(statement.unwrap());
                 }
                 Err(ParserError::EndOfSource) => break,
                 Err(e) => return Err(CompilerError::ParserError(e)),
                 _ => unreachable!(),
             }
         }
-        self.emit_code(OpCode::CreateModule);
-        //module.prototypes = self.states.into_iter().map(|s| s.prototype).collect();
-        Ok(module)
+
+        for statement in statements {
+            match statement {
+                Statement::Import { source, imports } => return Err(CompilerError::NotImplemented),
+                Statement::Let { .. } => {
+                    self.module_statement(statement)?;
+                }
+                Statement::Function { .. } => {
+                    self.module_statement(statement)?;
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        let prototype = self.state().build_prototype();
+        Ok(Module::new(
+            ident,
+            ModuleValue::Normal(prototype),
+            self.module_locals,
+        ))
     }
 
     pub fn compile(&mut self) -> Result<(), CompilerError> {
@@ -256,6 +266,27 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
 
+    pub fn module_statement(&mut self, statement: Statement) -> Result<(), CompilerError> {
+        match statement {
+            Statement::Let { ident, value } => {
+                if let Some(expression) = value {
+                    self.expression(expression)?;
+                } else {
+                    self.emit_code(OpCode::LoadUnit);
+                }
+                self.module_locals.push(ident);
+                Ok(())
+            }
+            Statement::Function { ident, args, expr } => {
+                self.function(ident.clone(), args, expr, false)?;
+                self.module_locals.push(ident);
+                Ok(())
+            }
+            Statement::Import { source, imports } => Err(CompilerError::NotImplemented),
+            _ => unreachable!(),
+        }
+    }
+
     pub fn statement(&mut self, statement: Statement) -> Result<(), CompilerError> {
         match statement {
             Statement::Let { ident, value } => {
@@ -268,11 +299,11 @@ impl<'a> Compiler<'a> {
                 Ok(())
             }
             Statement::Function { ident, args, expr } => {
-                self.function(ident.clone(), args, expr)?;
+                self.function(ident.clone(), args, expr, false)?;
                 self.add_local(ident)?;
                 Ok(())
             }
-            Statement::Import { source, imports } => todo!(),
+            Statement::Import { source, imports } => Err(CompilerError::NotImplemented),
             Statement::Expression(expression) => {
                 self.expression(expression)?;
                 Ok(())
@@ -353,7 +384,8 @@ impl<'a> Compiler<'a> {
                 self.begin_scope();
                 let block_len = block.len() - 1;
                 for (i, statement) in block.into_iter().enumerate() {
-                    let pop = matches!(statement, Statement::Expression(Expression::Call { .. }));
+                    let is_expression = statement.is_expression();
+                    let pop = !matches!(statement, Statement::Expression(Expression::Call { .. }));
                     let is_assignment = matches!(
                         statement,
                         Statement::Expression(Expression::Operation {
@@ -362,7 +394,7 @@ impl<'a> Compiler<'a> {
                         })
                     );
                     self.statement(statement)?;
-                    if i < block_len && pop {
+                    if i < block_len && is_expression && pop && !is_assignment {
                         self.emit_code(OpCode::Pop);
                     }
                     if i == block_len && is_assignment {
@@ -408,7 +440,7 @@ impl<'a> Compiler<'a> {
             }
             Expression::Function { args, expr } => {
                 let func_name = format!("<anonymous>");
-                self.function(func_name, args, *expr)?;
+                self.function(func_name, args, *expr, true)?;
                 Ok(())
             }
             Expression::If {
@@ -504,10 +536,11 @@ impl<'a> Compiler<'a> {
         ident: String,
         args: Vec<String>,
         expression: Expression,
+        is_anonymous: bool,
     ) -> Result<(), CompilerError> {
         let index = self.state().defined_states.len();
         let new_state = Rc::new(RefCell::new(
-            CompilerState::new(ident.clone())
+            CompilerState::new(ident.clone(), is_anonymous)
                 .with_depth(self.state().resolver.depth)
                 .with_parent(self.state.clone()),
         ));
@@ -531,9 +564,9 @@ impl<'a> Compiler<'a> {
 
         self.expression(expression)?;
         self.end_scope();
+        self.emit_code(OpCode::Return);
         let old_state = self.state().parent.clone().unwrap();
         self.state = old_state;
-        self.emit_code(OpCode::Return);
         self.emit_code(OpCode::Closure(index as FunctionIdx));
 
         Ok(())
@@ -577,41 +610,32 @@ impl<'a> Compiler<'a> {
                     self.emit_code(OpCode::SetTable);
                 }
             }
-            _ => todo!(),
+            _ => unreachable!(),
         }
         Ok(())
     }
 
     fn resolve_name(&mut self, ident: &str) -> Result<(OpCode, Option<OpCode>), CompilerError> {
-        if let Some(local) = self.state().resolver.resolve_local(&ident) {
-            if self.state().resolver.local(local).depth == 0 {
-                Ok((
-                    OpCode::GetModuleValue(local as LocalIdx),
-                    Some(OpCode::SetModuleValue(local as LocalIdx)),
-                ))
-            } else {
-                Ok((
-                    OpCode::GetLocal(local as LocalIdx),
-                    Some(OpCode::SetLocal(local as LocalIdx)),
-                ))
-            }
-        } else if let Some(index) = self.resolve_upvalue(&ident) {
-            let (upvalue, local) = self.get_upvalue_local(index);
-            if local.depth == 0 {
-                Ok((
-                    OpCode::GetModuleValue(upvalue.index as LocalIdx),
-                    Some(OpCode::SetModuleValue(upvalue.index as LocalIdx)),
-                ))
-            } else {
-                Ok((
-                    OpCode::GetUpvalue(index as LocalIdx),
-                    Some(OpCode::SetUpvalue(index as LocalIdx)),
-                ))
-            }
-        } else if let Some(module) = self.resolve_module(&ident) {
-            Ok((OpCode::GetModule(module as LocalIdx), None))
+        let local = self.state().resolver.resolve_local(&ident);
+        if let Some(local) = local {
+            return Ok((
+                OpCode::GetLocal(local as LocalIdx),
+                Some(OpCode::SetLocal(local as LocalIdx)),
+            ));
+        }
+
+        let upvalue = self.resolve_upvalue(&ident, self.state.clone());
+        if let Some(index) = upvalue {
+            return Ok((
+                OpCode::GetUpvalue(index as LocalIdx),
+                Some(OpCode::SetUpvalue(index as LocalIdx)),
+            ));
+        }
+
+        if let Some(module) = self.resolve_module(&ident) {
+            return Ok((OpCode::GetModule(module as LocalIdx), None));
         } else {
-            Err(CompilerError::LocalNotFound(ident.to_string()))
+            return Err(CompilerError::LocalNotFound(ident.to_string()));
         }
     }
 
@@ -619,19 +643,15 @@ impl<'a> Compiler<'a> {
         self.modules.iter().position(|m| m.ident == ident)
     }
 
-    fn get_upvalue_local(&self, index: usize) -> (&Upvalue, &Local) {
-        todo!()
-    }
-
-    fn resolve_upvalue(&self, ident: &str) -> Option<usize> {
-        let parent = self.state().parent.clone()?;
+    fn resolve_upvalue(&self, ident: &str, state: Rc<RefCell<CompilerState>>) -> Option<usize> {
+        let parent = state.borrow().parent.clone()?;
         let local = parent.borrow().resolver.resolve_local(ident);
         if let Some(local) = local {
             parent.borrow_mut().resolver.mark_captured(local);
             return self.add_upvalue(local, true);
         }
 
-        if let Some(upvalue) = self.resolve_upvalue(ident) {
+        if let Some(upvalue) = self.resolve_upvalue(ident, parent.borrow().parent.clone()?) {
             return self.add_upvalue(upvalue, false);
         }
 

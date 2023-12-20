@@ -1,7 +1,6 @@
 use std::{io::Write, rc::Rc};
 
 use crate::{
-    compiler::Upvalue,
     op::{ConstIdx, OpCode},
     value::{Closure, NativeFunction, Value},
     vm::Vm,
@@ -14,27 +13,31 @@ pub struct Local {
     pub is_captured: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct Upvalue {
+    pub index: usize,
+    pub is_local: bool,
+}
+
 #[derive(Debug, PartialEq)]
-pub struct ModuleLocal {
-    pub ident: String,
-    pub value: Value,
+pub enum ModuleValue {
+    Native(Vec<Value>),
+    Normal(Rc<Prototype>),
 }
 
 #[derive(Debug, PartialEq)]
 pub struct Module {
     pub ident: String,
     pub locals: Vec<String>,
-    pub prototypes: Vec<Prototype>,
-    pub is_executed: bool,
+    pub value: ModuleValue,
 }
 
 impl Module {
-    pub fn new(name: &str) -> Self {
+    pub fn new(name: &str, value: ModuleValue, locals: Vec<String>) -> Self {
         Self {
             ident: name.to_string(),
-            locals: Vec::new(),
-            prototypes: Vec::new(),
-            is_executed: false,
+            locals,
+            value,
         }
     }
 
@@ -47,11 +50,51 @@ impl Module {
     }
 
     pub fn dump(&self, buf: &mut impl Write) -> Result<(), std::io::Error> {
-        for (i, proto) in self.prototypes.iter().enumerate() {
-            write!(buf, "{i}: ")?;
-            proto.dump(buf)?;
+        match &self.value {
+            ModuleValue::Native(native) => {
+                for (value, name) in native.iter().zip(&self.locals) {
+                    writeln!(buf, "ident: {name} value: {value}")?;
+                }
+                Ok(())
+            }
+            ModuleValue::Normal(prototype) => prototype.dump(buf),
         }
-        Ok(())
+    }
+}
+
+pub struct NativeModuleBuilder {
+    pub ident: String,
+    pub locals: Vec<String>,
+    pub values: Vec<Value>,
+}
+
+impl NativeModuleBuilder {
+    pub fn new(ident: &str) -> Self {
+        Self {
+            ident: ident.to_string(),
+            locals: Vec::new(),
+            values: Vec::new(),
+        }
+    }
+
+    pub fn with_function(mut self, ident: &str, function: fn(&mut Vm) -> Value) -> Self {
+        self.locals.push(ident.to_string());
+        self.values
+            .push(Value::Closure(Rc::new(Closure::from_native(Rc::new(
+                NativeFunction {
+                    ident: ident.to_string(),
+                    function,
+                },
+            )))));
+        self
+    }
+
+    pub fn build(self) -> Module {
+        Module {
+            ident: self.ident,
+            locals: self.locals,
+            value: ModuleValue::Native(self.values),
+        }
     }
 }
 
@@ -84,10 +127,12 @@ pub struct Prototype {
     pub num_args: usize,
     pub debug_info: DebugInfo,
     pub upvalues: Vec<Upvalue>,
+    pub prototypes: Vec<Rc<Prototype>>,
+    pub is_anonymous: bool,
 }
 
 impl Prototype {
-    pub fn new(ident: String) -> Self {
+    pub fn new(ident: String, is_anonymous: bool) -> Self {
         Self {
             code: Vec::new(),
             constants: Vec::new(),
@@ -95,6 +140,8 @@ impl Prototype {
             num_args: 0,
             upvalues: Vec::new(),
             debug_info: DebugInfo::new(),
+            prototypes: Vec::new(),
+            is_anonymous,
         }
     }
 
@@ -166,6 +213,14 @@ impl Prototype {
             writeln!(buf, "{i}: {c}").unwrap();
         }
         writeln!(buf)?;
+
+        if !self.prototypes.is_empty() {
+            writeln!(buf, "defined in: {}", self.ident)?;
+            for proto in &self.prototypes {
+                proto.dump(buf)?;
+            }
+        }
+
         Ok(())
     }
 }

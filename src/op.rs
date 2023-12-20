@@ -16,12 +16,10 @@ pub enum OpCode {
     GetLocal(LocalIdx),
     GetUpvalue(LocalIdx),
     GetModule(LocalIdx),
-    GetModuleValue(LocalIdx),
     GetTable,
 
     SetLocal(LocalIdx),
     SetUpvalue(LocalIdx),
-    SetModuleValue(LocalIdx),
     SetTable,
 
     CreateList(InitLen),
@@ -54,7 +52,6 @@ pub enum OpCode {
     CloseUpvalue(u8),
     Pop,
     Return,
-    CreateModule,
 }
 
 impl Display for OpCode {
@@ -68,11 +65,9 @@ impl Display for OpCode {
             OpCode::GetLocal(idx) => write!(f, "GetLocal {idx}"),
             OpCode::GetUpvalue(idx) => write!(f, "GetUpvalue {idx}"),
             OpCode::GetModule(idx) => write!(f, "GetModule {idx}"),
-            OpCode::GetModuleValue(idx) => write!(f, "GetModuleValue {idx}"),
             OpCode::GetTable => write!(f, "GetTable"),
             OpCode::SetLocal(idx) => write!(f, "SetLocal {idx}"),
             OpCode::SetUpvalue(idx) => write!(f, "SetUpvalue {idx}"),
-            OpCode::SetModuleValue(idx) => write!(f, "SetModuleValue {idx}"),
             OpCode::SetTable => write!(f, "SetTable"),
             OpCode::CreateList(len) => write!(f, "CreateList {len}"),
             OpCode::CreateTable(len) => write!(f, "CreateTable {len}"),
@@ -99,7 +94,6 @@ impl Display for OpCode {
             OpCode::CloseUpvalue(index) => write!(f, "CloseUpvalue {index}"),
             OpCode::Pop => write!(f, "Pop"),
             OpCode::Return => write!(f, "Return"),
-            OpCode::CreateModule => write!(f, "CreateModule"),
         }
     }
 }

@@ -94,8 +94,8 @@ impl<'a> Parser<'a> {
         self.last_expr_line = self.lexer.line();
         match token {
             TokenType::Let => self.r#let(),
-            TokenType::From => todo!(),
-            TokenType::Import => todo!(),
+            TokenType::From => Err(ParserError::NotImplemented),
+            TokenType::Import => Err(ParserError::NotImplemented),
             TokenType::Eos => Err(ParserError::EndOfSource),
             TokenType::Unknown => Err(ParserError::UnknownToken),
             _ if self.depth == 0 => Err(ParserError::TopLevelExpressionNotAllowed),
@@ -595,6 +595,7 @@ pub enum ParserError {
     FoundStatementWhereExpressionWasExpected,
     FoundExpressionWhenStatementWasExpected,
     TopLevelExpressionNotAllowed,
+    NotImplemented,
 }
 
 #[cfg(test)]
