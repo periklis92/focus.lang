@@ -1,3 +1,14 @@
 /target
 /Cargo.lock
 /.vscode
+/build
+.DS_Store
+node_modules
+/playground/build
+/playground/.svelte-kit
+/playground/package
+.env
+.env.*
+!.env.example
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
