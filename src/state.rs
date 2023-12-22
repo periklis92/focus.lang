@@ -1,10 +1,83 @@
-use std::{io::Write, rc::Rc};
+use std::{io::Write, path::Path, rc::Rc};
 
 use crate::{
+    compiler::Compiler,
     op::{ConstIdx, OpCode},
+    stdlib,
     value::{Closure, NativeFunction, Value},
-    vm::Vm,
+    vm::{RuntimeError, Vm},
 };
+
+#[derive(Debug, Clone)]
+pub struct ModuleAlias {
+    pub ident: String,
+    pub module_index: usize,
+    pub local_index: usize,
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
+pub struct ModuleLoader {
+    modules: Vec<Rc<Module>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    root: String,
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
+impl ModuleLoader {
+    pub fn new(_root: &str) -> Self {
+        Self {
+            modules: vec![Rc::new(stdlib::io::module())],
+            #[cfg(not(target_arch = "wasm32"))]
+            root: _root.to_string(),
+        }
+    }
+
+    pub fn load_module_from_source(&mut self, ident: &str, source: &str) -> usize {
+        let compiler = Compiler::new(source, self);
+        let module = Rc::new(compiler.compile_module(ident).unwrap());
+        let index = self.modules.len();
+        self.modules.push(module.clone());
+        index
+    }
+}
+
+impl ModuleLoader {
+    pub fn add_module(&mut self, module: Module) {
+        self.modules.push(Rc::new(module));
+    }
+
+    pub fn add_modules(&mut self, modules: Vec<Module>) {
+        for module in modules {
+            self.add_module(module);
+        }
+    }
+
+    pub fn module(&self, ident: &str) -> Option<usize> {
+        self.modules.iter().position(|m| m.ident == ident)
+    }
+
+    pub fn module_at(&self, index: usize) -> Option<Rc<Module>> {
+        self.modules.get(index).cloned()
+    }
+
+    pub fn load_module(&mut self, path: impl AsRef<Path>) -> usize {
+        let path = if path.as_ref().extension().is_none() {
+            let mut buf = path.as_ref().to_path_buf();
+            buf.set_extension("fl");
+            buf.canonicalize().unwrap()
+        } else {
+            path.as_ref().canonicalize().unwrap()
+        };
+        let name = path.with_extension("");
+        let name = name.file_name().unwrap().to_str().unwrap();
+        let source = std::fs::read_to_string(path).unwrap();
+        let compiler = Compiler::new(&source, self);
+        let module = Rc::new(compiler.compile_module(name).unwrap());
+        let index = self.modules.len();
+        self.modules.push(module.clone());
+        index
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Local {
@@ -19,13 +92,13 @@ pub struct Upvalue {
     pub is_local: bool,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum ModuleValue {
     Native(Vec<Value>),
     Normal(Rc<Prototype>),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Module {
     pub ident: String,
     pub locals: Vec<String>,
@@ -77,13 +150,17 @@ impl NativeModuleBuilder {
         }
     }
 
-    pub fn with_function(mut self, ident: &str, function: fn(&mut Vm) -> Value) -> Self {
+    pub fn with_function<T: Fn(&mut Vm) -> Result<Value, RuntimeError> + 'static>(
+        mut self,
+        ident: &str,
+        function: T,
+    ) -> Self {
         self.locals.push(ident.to_string());
         self.values
             .push(Value::Closure(Rc::new(Closure::from_native(Rc::new(
                 NativeFunction {
                     ident: ident.to_string(),
-                    function,
+                    function: Rc::new(function),
                 },
             )))));
         self

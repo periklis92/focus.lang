@@ -1,7 +1,7 @@
 use crate::{
     ast::{
-        ArithmeticOperator, BooleanOperator, ComparisonOperator, Expression, InterpolatedArgument,
-        Literal, Operation, PathPart, Statement, TableEntry, UnaryOperation,
+        ArithmeticOperator, BooleanOperator, ComparisonOperator, Expression, Import, ImportSource,
+        InterpolatedArgument, Literal, Operation, PathPart, Statement, TableEntry, UnaryOperation,
     },
     lexer::Lexer,
     token::{Token, TokenType},
@@ -95,7 +95,28 @@ impl<'a> Parser<'a> {
         match token {
             TokenType::Let => self.r#let(),
             TokenType::From => Err(ParserError::NotImplemented),
-            TokenType::Import => Err(ParserError::NotImplemented),
+            TokenType::Import => {
+                self.lexer.next();
+
+                let source = if self.lexer.peek() == TokenType::DoubleQuote {
+                    match self.string()? {
+                        Expression::Literal(Literal::String(string)) => ImportSource::File(string),
+                        Expression::InterpolatedString { .. } => {
+                            return Err(ParserError::UnexpectedExpression(
+                                "interpolated string".to_string(),
+                            ));
+                        }
+                        _ => unreachable!(),
+                    }
+                } else {
+                    todo!()
+                };
+
+                Ok(Statement::Import {
+                    source,
+                    imports: vec![Import::All { alias: None }],
+                })
+            }
             TokenType::Eos => Err(ParserError::EndOfSource),
             TokenType::Unknown => Err(ParserError::UnknownToken),
             _ if self.depth == 0 => Err(ParserError::TopLevelExpressionNotAllowed),

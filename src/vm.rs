@@ -1,10 +1,11 @@
 use core::panic;
-use std::{cell::RefCell, rc::Rc, usize};
+use std::{cell::RefCell, error::Error, fmt::Display, rc::Rc, usize};
 
 use crate::{
     op::OpCode,
-    state::{Module, ModuleValue},
-    value::{ArrayRef, Closure, ClosureRef, Function, Table, Upvalue, UpvalueRef, Value},
+    state::{Module, ModuleLoader, ModuleValue},
+    stdlib,
+    value::{Closure, ClosureRef, Function, Table, Upvalue, UpvalueRef, Value},
 };
 
 const NUM_FRAMES: usize = 64;
@@ -16,62 +17,90 @@ struct CallFrame {
     slot_offset: usize,
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 pub struct Vm {
     frames: Vec<CallFrame>,
     stack: Vec<Value>,
     open_upvalues: Vec<UpvalueRef>,
-    compiled_modules: Vec<ArrayRef>,
-    modules: Vec<Rc<Module>>,
+    module_loader: ModuleLoader,
+    #[cfg(target_arch = "wasm32")]
+    event_emitter: web_sys::EventTarget,
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
+#[cfg(target_arch = "wasm32")]
 impl Vm {
-    pub fn new() -> Self {
+    pub fn add_event_listener(&self, type_: &str, function: &js_sys::Function) {
+        self.event_emitter
+            .add_event_listener_with_callback(type_, function)
+            .unwrap();
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Vm {
+    pub fn event_target(&mut self) -> &mut web_sys::EventTarget {
+        &mut self.event_emitter
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
+impl Vm {
+    pub fn new(module_loader: ModuleLoader) -> Self {
         Self {
             frames: Vec::with_capacity(NUM_FRAMES),
             stack: Vec::with_capacity(STACK_SIZE * NUM_FRAMES),
             open_upvalues: Vec::new(),
-            compiled_modules: Vec::new(),
-            modules: Vec::new(),
+            module_loader,
+            #[cfg(target_arch = "wasm32")]
+            event_emitter: web_sys::EventTarget::new().unwrap(),
         }
     }
 
-    pub fn with_modules(mut self, modules: Vec<Module>) -> Self {
-        for module in modules {
-            let module = Rc::new(module);
-            self.modules.push(module.clone());
+    pub fn new_with_std() -> Self {
+        let mut module_loader = ModuleLoader::new("");
+        module_loader.add_modules(stdlib::modules());
+        Self {
+            frames: Vec::with_capacity(NUM_FRAMES),
+            stack: Vec::with_capacity(STACK_SIZE * NUM_FRAMES),
+            open_upvalues: Vec::new(),
+            module_loader,
+            event_emitter: web_sys::EventTarget::new().unwrap(),
         }
-        self
     }
 
-    pub fn execute_module(&mut self, module: Module, ident: &str) {
+    pub fn execute_from_source(&mut self, source: &str) -> Result<(), RuntimeError> {
+        let index = self.module_loader.load_module_from_source("main", source);
+        self.execute_module(index, "main")
+    }
+
+    pub fn execute_module(&mut self, index: usize, ident: &str) -> Result<(), RuntimeError> {
+        let module = self.module_loader.module_at(index).unwrap();
         let index = module.local(ident).unwrap();
-        self.load_module(module);
+        self.load_module(module)?;
         let closure = self.stack[index].clone().as_closure().unwrap();
+        self.push(Value::Closure(closure.clone()));
         self.push(Value::Unit);
-        self.call(closure, 1, true);
-        self.run();
+        self.call(closure, 1)?;
+        self.run()
     }
+}
 
-    fn load_module(&mut self, module: Module) {
+impl Vm {
+    fn load_module(&mut self, module: Rc<Module>) -> Result<(), RuntimeError> {
         let module = Rc::new(module);
         match &module.value {
-            ModuleValue::Native(native) => todo!(),
+            ModuleValue::Native(_) => return Err(RuntimeError::CannotLoadNativeModuleAtRuntime),
             ModuleValue::Normal(prototype) => {
                 let main = prototype.clone();
                 let closure = Rc::new(Closure::from_prototype(main));
-                self.call(closure, 0, false);
-                self.run();
+                self.push(Value::Closure(closure.clone()));
+                self.call(closure, 0)?;
+                self.run()?;
             }
         }
-    }
 
-    pub fn interpret(&mut self) {
-        /*    let main = Rc::new(self.states[0].prototype.clone());
-        let closure = Rc::new(Closure::from_prototype(main));
-        self.push(Value::Closure(Rc::clone(&closure)));
-        self.call(closure, 0);
-        self.run();*/
-        todo!()
+        Ok(())
     }
 
     pub fn stack(&self) -> &[Value] {
@@ -86,7 +115,7 @@ impl Vm {
         self.frames.last_mut().unwrap()
     }
 
-    fn run(&mut self) {
+    fn run(&mut self) -> Result<(), RuntimeError> {
         loop {
             self.frame_mut().ip += 1;
             if self.frame_mut().ip
@@ -146,7 +175,7 @@ impl Vm {
                     };
                 }
                 OpCode::GetModule(index) => {
-                    let module = &self.modules[index as usize];
+                    let module = &self.module_loader.module_at(index as usize).unwrap();
                     let value = Rc::clone(module);
                     self.push(Value::Module(value));
                 }
@@ -174,7 +203,22 @@ impl Vm {
                             if let Value::Integer(integer) = key {
                                 let value = match &module.value {
                                     ModuleValue::Native(native) => native[integer as usize].clone(),
-                                    ModuleValue::Normal(_) => todo!(),
+                                    ModuleValue::Normal(prototype) => {
+                                        let closure =
+                                            Rc::new(Closure::from_prototype(prototype.clone()));
+                                        self.push(Value::Closure(closure.clone()));
+                                        self.call(closure.clone(), 0)?;
+                                        let slot_offset = self.frame().slot_offset;
+                                        let value =
+                                            self.stack[slot_offset + integer as usize].clone();
+                                        self.close_upvalues(
+                                            self.frames.last().unwrap().slot_offset,
+                                        );
+                                        let frame = self.frames.pop().unwrap();
+                                        let frame_offset = frame.slot_offset;
+                                        self.stack.truncate(frame_offset);
+                                        value
+                                    }
                                 };
                                 self.push(value);
                             } else {
@@ -390,7 +434,7 @@ impl Vm {
                     let result = match value {
                         Value::Integer(i) => Value::Integer(-i),
                         Value::Number(n) => Value::Number(-n),
-                        _ => panic!(),
+                        _ => return Err(RuntimeError::NegateOperatorOnNonNumericValue),
                     };
                     self.push(result);
                 }
@@ -412,10 +456,10 @@ impl Vm {
                         .clone();
                     match value {
                         Value::Closure(closure) => match &closure.function {
-                            Function::Prototype(_) => self.call(closure, num_args as usize, true),
-                            Function::Native(_) => self.call_native(closure, num_args as usize),
+                            Function::Prototype(_) => self.call(closure, num_args as usize)?,
+                            Function::Native(_) => self.call_native(closure, num_args as usize)?,
                         },
-                        _ => panic!("Cannot call non closure value ({value:?})"),
+                        _ => return Err(RuntimeError::CannotCallNonCallableValue),
                     }
                 }
                 OpCode::CmpEq => {
@@ -508,23 +552,25 @@ impl Vm {
                 }
                 OpCode::Return => {
                     if self.frames.len() == 1 {
-                        return;
+                        return Ok(());
                     } else {
                         let result = self.pop();
                         self.close_upvalues(self.frames.last().unwrap().slot_offset);
                         let frame = self.frames.pop().unwrap();
                         if self.frames.is_empty() {
-                            return;
+                            return Ok(());
                         }
 
                         let frame_offset = frame.slot_offset;
                         self.stack.truncate(frame_offset);
                         self.push(result);
-                        return;
+                        return Ok(());
                     }
                 }
             }
         }
+
+        Ok(())
     }
 
     fn capture_upvalue(&mut self, index: usize) -> UpvalueRef {
@@ -562,7 +608,7 @@ impl Vm {
             if location < last {
                 break;
             }
-            upvalue.replace_with(|_| Upvalue::Closed {
+            upvalue.replace(Upvalue::Closed {
                 value: self.stack[location].clone(),
             });
             i -= 1;
@@ -571,45 +617,47 @@ impl Vm {
         self.open_upvalues.truncate(i);
     }
 
-    pub fn call(&mut self, closure: ClosureRef, num_args: usize, recursive: bool) {
+    pub fn call(&mut self, closure: ClosureRef, num_args: usize) -> Result<(), RuntimeError> {
         if closure.function.prototype().unwrap().num_args != num_args {
-            panic!("Incorrect number of arguments.");
+            return Err(RuntimeError::IncorrectNumberOfArguments);
         }
 
         if self.frames.len() == usize::MAX {
-            panic!("Stack overflow: max number of frames.");
+            return Err(RuntimeError::StackOverflow);
         }
 
         let frame = CallFrame {
             closure,
             ip: 0,
-            slot_offset: (self.stack.len() - num_args - if recursive { 1 } else { 0 }),
+            slot_offset: (self.stack.len() - num_args - 1),
         };
         self.frames.push(frame);
-        self.run();
+        self.run()
     }
 
-    fn call_native(&mut self, closure: ClosureRef, num_args: usize) {
+    fn call_native(&mut self, closure: ClosureRef, num_args: usize) -> Result<(), RuntimeError> {
         if self.frames.len() == usize::MAX {
-            panic!("Stack overflow: max number of frames.");
+            return Err(RuntimeError::StackOverflow);
         }
 
         let frame = CallFrame {
             closure: closure.clone(),
             ip: 0,
-            slot_offset: (self.stack.len() - num_args),
+            slot_offset: (self.stack.len() - num_args - 1),
         };
         self.frames.push(frame);
-        let result = (closure.function.native().unwrap().function)(self);
+        let result = (closure.function.native().unwrap().function)(self)?;
         let frame = self.frames.pop().unwrap();
         self.pop();
         if self.frames.is_empty() {
-            return;
+            return Ok(());
         }
 
         let frame_offset = frame.slot_offset;
         self.stack.truncate(frame_offset);
         self.push(result);
+
+        Ok(())
     }
 
     pub fn top(&mut self) -> usize {
@@ -624,5 +672,45 @@ impl Vm {
 
     pub fn pop(&mut self) -> Value {
         self.stack.pop().unwrap()
+    }
+}
+
+#[derive(Debug)]
+pub enum RuntimeError {
+    StackOverflow,
+    IncorrectNumberOfArguments,
+    NegateOperatorOnNonNumericValue,
+    CannotCallNonCallableValue,
+    CannotLoadNativeModuleAtRuntime,
+    UnexpectedType,
+}
+
+impl Error for RuntimeError {}
+
+impl Display for RuntimeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RuntimeError::StackOverflow => write!(f, "Stack Overflow"),
+            RuntimeError::IncorrectNumberOfArguments => {
+                write!(f, "Incorrect Number of Arguments")
+            }
+            RuntimeError::NegateOperatorOnNonNumericValue => {
+                write!(f, "Negate operator on non numeric value")
+            }
+            RuntimeError::CannotCallNonCallableValue => write!(f, "Cannot call non callable value"),
+            RuntimeError::CannotLoadNativeModuleAtRuntime => {
+                write!(f, "Cannot load native module at runtime")
+            }
+            RuntimeError::UnexpectedType => {
+                write!(f, "Unexpected type")
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Into<wasm_bindgen::JsValue> for RuntimeError {
+    fn into(self) -> wasm_bindgen::JsValue {
+        wasm_bindgen::JsValue::from_str(&self.to_string())
     }
 }

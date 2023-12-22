@@ -1,10 +1,10 @@
-use std::{fs::File, io::Write, path::Path};
+use std::{fs::File, path::Path};
 
-use focus_third::{
-    compiler::{Compiler, CompilerError},
-    parser::ParserError,
+use focus_lang::{
+    compiler::CompilerError,
+    state::ModuleLoader,
     stdlib,
-    vm::Vm,
+    vm::{RuntimeError, Vm},
 };
 
 #[derive(Debug)]
@@ -13,11 +13,18 @@ enum RunCliError {
     ReadWriteError(std::io::Error),
     FileError(std::io::Error),
     CompilerError(CompilerError),
+    RuntimeError(RuntimeError),
 }
 
 impl From<CompilerError> for RunCliError {
     fn from(value: CompilerError) -> Self {
         Self::CompilerError(value)
+    }
+}
+
+impl From<RuntimeError> for RunCliError {
+    fn from(value: RuntimeError) -> Self {
+        Self::RuntimeError(value)
     }
 }
 
@@ -27,28 +34,22 @@ fn main() -> Result<(), RunCliError> {
         return Err(RunCliError::MissingInput);
     };
 
-    let source = std::io::read_to_string(
-        File::open(input_filename.clone()).map_err(RunCliError::FileError)?,
-    )
-    .map_err(RunCliError::ReadWriteError)?;
-    let mut compiler = Compiler::new(&source);
-    compiler.add_module(stdlib::string::module());
-    compiler.add_module(stdlib::io::module());
-    compiler.add_module(stdlib::iter::module());
-    let module = compiler.compile_module("<main>")?;
+    let mut module_loader = ModuleLoader::new("");
+    module_loader.add_modules(stdlib::modules());
+    module_loader.load_module(&input_filename);
 
     let mut out = File::create(Path::new(&input_filename).with_extension("flb"))
         .map_err(RunCliError::FileError)?;
-    module
+    module_loader
+        .module_at(4)
+        .unwrap()
         .dump(&mut out)
         .map_err(|e| RunCliError::ReadWriteError(e))?;
 
-    let mut interpreter = Vm::new().with_modules(vec![
-        stdlib::string::module(),
-        stdlib::io::module(),
-        stdlib::iter::module(),
-    ]);
-    interpreter.execute_module(module, "main");
+    let module = module_loader
+        .load_module_from_source("test", "let main () = Io.printf \"Hello World: {(2)}\"");
+    let mut interpreter = Vm::new(module_loader);
+    interpreter.execute_module(module, "main")?;
     let last_value = interpreter.stack().last().unwrap();
     println!("{last_value}");
 

@@ -1,6 +1,6 @@
 use std::fs::File;
 
-use focus_third::parser::{Parser, ParserError};
+use focus_lang::parser::{Parser, ParserError};
 
 #[derive(Debug)]
 enum ParseCliError {
@@ -43,7 +43,7 @@ fn main() -> Result<(), ParseCliError> {
 
     println!("{tree:?}");
 
-    let mut f = File::create("out.txt").map_err(ParseCliError::FileError)?;
+    //let mut f = File::create("out.txt").map_err(ParseCliError::FileError)?;
 
     Ok(())
 }

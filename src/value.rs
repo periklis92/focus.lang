@@ -1,8 +1,14 @@
-use std::{cell::RefCell, collections::HashMap, fmt::Display, hash::Hash, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    fmt::{Debug, Display},
+    hash::Hash,
+    rc::Rc,
+};
 
 use crate::{
     state::{Module, Prototype},
-    vm::Vm,
+    vm::{RuntimeError, Vm},
 };
 
 pub type Table = HashMap<Value, Value>;
@@ -15,7 +21,7 @@ pub type UpvalueRef = Rc<RefCell<Upvalue>>;
 pub type ClosureRef = Rc<Closure>;
 pub type ArrayRef = Rc<RefCell<Vec<Value>>>;
 pub type ModuleRef = Rc<Module>;
-pub type UserDataRef = Rc<dyn std::any::Any>;
+pub type UserDataRef = Box<Rc<dyn std::any::Any>>;
 
 #[derive(Debug, PartialEq)]
 pub enum Upvalue {
@@ -23,15 +29,23 @@ pub enum Upvalue {
     Closed { value: Value },
 }
 
-#[derive(Debug)]
 pub struct NativeFunction {
     pub ident: String,
-    pub function: fn(&mut Vm) -> Value,
+    pub function: Rc<dyn Fn(&mut Vm) -> Result<Value, RuntimeError>>,
 }
 
 impl PartialEq for NativeFunction {
     fn eq(&self, other: &Self) -> bool {
-        self.ident == other.ident && self.function == other.function
+        self.ident == other.ident && Rc::as_ptr(&self.function) == Rc::as_ptr(&other.function)
+    }
+}
+
+impl Debug for NativeFunction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NativeFunction")
+            .field("ident", &self.ident)
+            .field("function", &Rc::as_ptr(&self.function))
+            .finish()
     }
 }
 

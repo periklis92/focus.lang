@@ -1,17 +1,17 @@
 use std::{
-    cell::{Ref, RefCell, RefMut},
+    cell::{RefCell, RefMut},
     io::{BufWriter, Write},
     rc::Rc,
 };
 
 use crate::{
     ast::{
-        ArithmeticOperator, BooleanOperator, ComparisonOperator, Expression, Literal, Operation,
-        PathPart, Statement, UnaryOperation,
+        ArithmeticOperator, BooleanOperator, ComparisonOperator, Expression, Import, ImportSource,
+        Literal, Operation, PathPart, Statement, UnaryOperation,
     },
     op::{FunctionIdx, InitLen, LocalIdx, OpCode},
     parser::{Parser, ParserError},
-    state::{Local, Module, ModuleValue, Prototype, Upvalue},
+    state::{Local, Module, ModuleAlias, ModuleLoader, ModuleValue, Prototype, Upvalue},
     value::Value,
 };
 
@@ -174,17 +174,19 @@ impl CompilerState {
 pub struct Compiler<'a> {
     pub state: Rc<RefCell<CompilerState>>,
     pub parser: Parser<'a>,
-    pub modules: Vec<Module>,
     pub module_locals: Vec<String>,
+    pub module_provider: &'a mut ModuleLoader,
+    pub module_aliases: Vec<ModuleAlias>,
 }
 
 impl<'a> Compiler<'a> {
-    pub fn new(source: &'a str) -> Self {
+    pub fn new(source: &'a str, module_provider: &'a mut ModuleLoader) -> Self {
         Self {
             state: Rc::new(RefCell::new(CompilerState::new("<main>".to_string(), true))),
             parser: Parser::new(source),
-            modules: Vec::new(),
             module_locals: Vec::new(),
+            module_provider,
+            module_aliases: Vec::new(),
         }
     }
 
@@ -196,18 +198,14 @@ impl<'a> Compiler<'a> {
         self.state.borrow_mut()
     }
 
-    pub fn add_module(&mut self, module: Module) {
-        self.modules.push(module);
-    }
-
     pub fn compile_module(mut self, ident: &str) -> Result<Module, CompilerError> {
         let mut statements = Vec::new();
+        self.add_local("<main>".to_string())?;
+        self.module_locals.push("<main>".to_string());
         loop {
             let statement = self.parser.parse();
             match statement {
-                Ok(Statement::Import { source, imports }) => {
-                    return Err(CompilerError::NotImplemented);
-                }
+                Ok(Statement::Import { .. }) => statements.push(statement.unwrap()),
                 Ok(Statement::Let { ref ident, .. }) => {
                     self.add_local(ident.to_string())?;
                     statements.push(statement.unwrap());
@@ -223,16 +221,7 @@ impl<'a> Compiler<'a> {
         }
 
         for statement in statements {
-            match statement {
-                Statement::Import { source, imports } => return Err(CompilerError::NotImplemented),
-                Statement::Let { .. } => {
-                    self.module_statement(statement)?;
-                }
-                Statement::Function { .. } => {
-                    self.module_statement(statement)?;
-                }
-                _ => unreachable!(),
-            }
+            self.module_statement(statement)?;
         }
 
         let prototype = self.state().build_prototype();
@@ -261,7 +250,7 @@ impl<'a> Compiler<'a> {
         }
         self.add_local("<main>".to_string())?;
         for statement in expressions {
-            self.statement(statement)?;
+            self.module_statement(statement)?;
         }
         Ok(())
     }
@@ -282,7 +271,28 @@ impl<'a> Compiler<'a> {
                 self.module_locals.push(ident);
                 Ok(())
             }
-            Statement::Import { source, imports } => Err(CompilerError::NotImplemented),
+            Statement::Import { source, imports } => {
+                let module_index = match source {
+                    ImportSource::Module(_) => todo!(),
+                    ImportSource::File(filename) => self.module_provider.load_module(filename),
+                };
+
+                let module = self.module_provider.module_at(module_index).unwrap();
+
+                match imports.as_slice() {
+                    [Import::All { alias: None }] => {
+                        for (i, local) in module.locals.iter().enumerate() {
+                            self.module_aliases.push(ModuleAlias {
+                                ident: local.to_string(),
+                                module_index,
+                                local_index: i,
+                            });
+                        }
+                    }
+                    _ => {}
+                }
+                Ok(())
+            }
             _ => unreachable!(),
         }
     }
@@ -303,7 +313,28 @@ impl<'a> Compiler<'a> {
                 self.add_local(ident)?;
                 Ok(())
             }
-            Statement::Import { source, imports } => Err(CompilerError::NotImplemented),
+            Statement::Import { source, imports } => {
+                let module_index = match source {
+                    ImportSource::Module(_) => todo!(),
+                    ImportSource::File(filename) => self.module_provider.load_module(filename),
+                };
+
+                let module = self.module_provider.module_at(module_index).unwrap();
+
+                match imports.as_slice() {
+                    [Import::All { alias: None }] => {
+                        for (i, local) in module.locals.iter().enumerate() {
+                            self.module_aliases.push(ModuleAlias {
+                                ident: local.to_string(),
+                                module_index,
+                                local_index: i,
+                            });
+                        }
+                    }
+                    _ => {}
+                }
+                Ok(())
+            }
             Statement::Expression(expression) => {
                 self.expression(expression)?;
                 Ok(())
@@ -405,15 +436,30 @@ impl<'a> Compiler<'a> {
                 Ok(())
             }
             Expression::Path { ident, parts } => {
-                let (getter, _) = self.resolve_name(&ident)?;
-                self.emit_code(getter);
+                let mut getter = None;
+                if let Some((g, _)) = self.resolve_name(&ident) {
+                    self.emit_code(g);
+                    getter = Some(g);
+                } else if let Some(alias) = self.resolve_module_alias(&ident) {
+                    self.emit_code(OpCode::GetModule(alias.module_index as u8));
+                    self.constant(Value::Integer(alias.local_index as i64))?;
+                    self.emit_code(OpCode::GetTable);
+                } else if let Some(module) = self.resolve_module(&ident) {
+                    let opcode = OpCode::GetModule(module as u8);
+                    self.emit_code(opcode);
+                    getter = Some(opcode);
+                } else {
+                    return Err(CompilerError::NameNotFound(ident));
+                }
                 for part in parts {
                     match part {
                         PathPart::Ident(ident) => match getter {
-                            OpCode::GetModule(i) => self.constant(Value::Integer(
-                                self.modules[i as usize]
+                            Some(OpCode::GetModule(i)) => self.constant(Value::Integer(
+                                self.module_provider
+                                    .module_at(i as usize)
+                                    .unwrap()
                                     .local(&ident)
-                                    .ok_or(CompilerError::LocalNotFound(ident))?
+                                    .ok_or(CompilerError::NameNotFound(ident))?
                                     as i64,
                             ))?,
                             _ => self.constant(Value::String(Rc::new(ident)))?,
@@ -582,7 +628,14 @@ impl<'a> Compiler<'a> {
     fn assignment(&mut self, lhs: Expression, rhs: Expression) -> Result<(), CompilerError> {
         match lhs {
             Expression::Path { ident, parts } => {
-                let (getter, setter) = self.resolve_name(&ident)?;
+                let (getter, setter) = if let Some((g, s)) = self.resolve_name(&ident) {
+                    (g, s)
+                } else if let Some(module) = self.resolve_module(&ident) {
+                    (OpCode::GetModule(module as u8), None)
+                } else {
+                    return Err(CompilerError::NameNotFound(ident.to_string()));
+                };
+
                 if parts.is_empty() {
                     self.expression(rhs)?;
                     if let Some(setter) = setter {
@@ -615,10 +668,10 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
 
-    fn resolve_name(&mut self, ident: &str) -> Result<(OpCode, Option<OpCode>), CompilerError> {
+    fn resolve_name(&mut self, ident: &str) -> Option<(OpCode, Option<OpCode>)> {
         let local = self.state().resolver.resolve_local(&ident);
         if let Some(local) = local {
-            return Ok((
+            return Some((
                 OpCode::GetLocal(local as LocalIdx),
                 Some(OpCode::SetLocal(local as LocalIdx)),
             ));
@@ -626,21 +679,24 @@ impl<'a> Compiler<'a> {
 
         let upvalue = self.resolve_upvalue(&ident, self.state.clone());
         if let Some(index) = upvalue {
-            return Ok((
+            return Some((
                 OpCode::GetUpvalue(index as LocalIdx),
                 Some(OpCode::SetUpvalue(index as LocalIdx)),
             ));
         }
 
-        if let Some(module) = self.resolve_module(&ident) {
-            return Ok((OpCode::GetModule(module as LocalIdx), None));
-        } else {
-            return Err(CompilerError::LocalNotFound(ident.to_string()));
-        }
+        return None;
+    }
+
+    fn resolve_module_alias(&self, ident: &str) -> Option<ModuleAlias> {
+        self.module_aliases
+            .iter()
+            .find(|local| local.ident == ident)
+            .cloned()
     }
 
     fn resolve_module(&self, ident: &str) -> Option<usize> {
-        self.modules.iter().position(|m| m.ident == ident)
+        self.module_provider.module(ident)
     }
 
     fn resolve_upvalue(&self, ident: &str, state: Rc<RefCell<CompilerState>>) -> Option<usize> {
@@ -748,7 +804,7 @@ pub enum CompilerError {
     UnexpectedLocalAssignment,
     UnexpectedExpression,
     ListInitializerTooLong,
-    LocalNotFound(String),
+    NameNotFound(String),
     MapInitializerTooLong,
     CannotUseUnitializedLocal,
     MaxNumberOfLocalsExceeded,

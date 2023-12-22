@@ -1,6 +1,6 @@
 use std::{fs::File, path::Path};
 
-use focus_third::compiler::{Compiler, CompilerError};
+use focus_lang::{compiler::CompilerError, state::ModuleLoader, stdlib};
 
 #[derive(Debug)]
 enum CompileCliError {
@@ -22,18 +22,15 @@ fn main() -> Result<(), CompileCliError> {
         return Err(CompileCliError::MissingInput);
     };
 
-    let source =
-        std::io::read_to_string(File::open(&input_filename).map_err(CompileCliError::FileError)?)
-            .map_err(CompileCliError::ReadWriteError)?;
-    let mut compiler = Compiler::new(&source);
-    // compiler.add_module(stdlib::string::module());
-    // compiler.add_module(stdlib::io::module());
-    // compiler.add_module(stdlib::iter::module());
-    let module = compiler.compile_module("main")?;
+    let mut module_loader = ModuleLoader::new("");
+    module_loader.add_modules(stdlib::modules());
+    module_loader.load_module(&input_filename);
 
     let mut out = File::create(Path::new(&input_filename).with_extension("flb"))
         .map_err(CompileCliError::FileError)?;
-    module
+    module_loader
+        .module_at(3)
+        .unwrap()
         .dump(&mut out)
         .map_err(|e| CompileCliError::ReadWriteError(e))?;
 
