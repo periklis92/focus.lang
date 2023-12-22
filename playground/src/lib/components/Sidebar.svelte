@@ -59,7 +59,11 @@
 				</ul>
 			{:else}
 				<div>
-					<a href="#" class="icon-link text-decoration-none" on:click={() => (content = undefined)}>
+					<a
+						href="/"
+						class="icon-link text-decoration-none"
+						on:click|preventDefault={() => (content = undefined)}
+					>
 						<i class="bi bi-arrow-left" /> Back
 					</a>
 				</div>
