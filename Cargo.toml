@@ -1,9 +1,22 @@
 [package]
-name = "focus-third"
+name = "focus-lang"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 tracing = "0.1.37"
+
+[target.wasm32-unknown-unknown.dependencies]
+wasm-bindgen = "0.2.89"
+js-sys = "0.3.66"
+web-sys = { version = "0.3.66", features = [
+    "console",
+    "Window",
+    "Event",
+    "CustomEvent",
+    "CustomEventInit",
+    "EventTarget",
+] }
