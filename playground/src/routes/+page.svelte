@@ -32,6 +32,7 @@
 				vm.execute_from_source(source);
 			} catch (error) {
 				console.error(error);
+				output.log(error as string);
 			}
 		}
 	}

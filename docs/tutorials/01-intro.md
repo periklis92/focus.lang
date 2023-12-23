@@ -1,8 +1,7 @@
-# Hello World!
 
 This is a simple "Hello World" example.
 
-## The main function
+## The `main` function
 
 Every program's entry point is the `main` function.
 
@@ -19,4 +18,11 @@ let main () = Io.print "Hello World"
 In order to print "Hello World" to the console, we need to use the built-in module `Io`. Modules can contain a number of function and/or values.
 Here we call the function `print`.
 
-Try to `Run` (button in the top right) the program and see the output in the console below.
+Try to `Run` *(button in the top right or `F5`)* the program and see the output in the console below.
+
+## The `print` function
+
+The print function is a built-in function that can take any number of arguments and print them in the output in order.
+
+
+Try to split `"Hello"` and `"World"` into two separate strings and run the program again. Don't forget to leave an empty space between them.

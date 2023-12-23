@@ -1,7 +1,19 @@
 <script lang="ts">
-	import { createEventDispatcher } from 'svelte';
+	import { createEventDispatcher, onMount } from 'svelte';
 
 	const dispatch = createEventDispatcher<{ run: void; reset: void; save: void; load: void }>();
+
+	function keyHandler(e: KeyboardEvent) {
+		if (e.key === 'F5') {
+			e.preventDefault();
+
+			dispatch('run');
+		}
+	}
+
+	onMount(() => {
+		document.addEventListener('keydown', keyHandler);
+	});
 </script>
 
 <nav class="navbar navbar-expand-lg bg-body-tertiary" style="height: 105px;">

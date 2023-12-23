@@ -50,7 +50,7 @@
 		on:keydown={handleKey}
 		role="textbox"
 		tabindex="0"
-	/>
+	></div>
 </div>
 
 <style>

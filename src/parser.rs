@@ -520,7 +520,9 @@ impl<'a> Parser<'a> {
         let mut args = Vec::new();
         let mut offset = 0;
         let mut string = String::new();
-        while self.lexer.peek() != TokenType::DoubleQuote && self.lexer.peek() != TokenType::Eos {
+        while self.lexer.peek_empty() != TokenType::DoubleQuote
+            && self.lexer.peek_empty() != TokenType::Eos
+        {
             if self.lexer.next_checked(TokenType::Eos).is_some() {
                 return Err(ParserError::EarlyEos);
             } else if self.lexer.peek_empty() == TokenType::LCurly
