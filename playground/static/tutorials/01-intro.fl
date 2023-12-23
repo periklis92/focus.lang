@@ -1,0 +1,1 @@
+let main () = Io.print "Hello World"

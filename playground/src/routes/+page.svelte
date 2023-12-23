@@ -4,6 +4,10 @@
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import Output from '$lib/components/Output.svelte';
 	import { Vm } from '$lib/focus-lang/focus_lang';
+	import { base } from '$app/paths';
+	import type { MenuItem } from '$lib/menu';
+
+	import * as marked from 'marked';
 
 	let sidebar: Sidebar;
 	let codeEditor: CodeEditor;
@@ -14,7 +18,7 @@
 		if (e.ctrlKey && e.key === 's') {
 			e.preventDefault();
 			e.stopPropagation();
-			localStorage.setItem('code', source);
+			codeEditor.save();
 		}
 	});
 
@@ -31,32 +35,58 @@
 			}
 		}
 	}
+
+	async function loadMenuItem(item: CustomEvent<MenuItem>) {
+		if (item.detail.markdown) {
+			const content = await (await fetch(`${base}/${item.detail.markdown}`)).text();
+			sidebar.setContent(await marked.parse(content));
+		}
+
+		if (item.detail.code) {
+			const code = await (await fetch(`${base}/${item.detail.code}`)).text();
+			source = code;
+		}
+	}
 </script>
 
-<main
-	class="d-flex flex-nowrap"
-	style="height: 100vh; max-height: 100vh; overflow-x: auto; overflow-y: hidden;"
->
+<main class="d-flex flex-nowrap" style="height: 100vh; overflow-x: auto; overflow-y: hidden;">
 	<Sidebar
 		bind:this={sidebar}
-		on:selected={(item) => sidebar.setContent('Hello ' + item.detail)}
+		on:selected={loadMenuItem}
 		menu={[
 			{
 				title: 'Tutorials',
 				icon: 'bi bi-book',
-				items: [{ title: '01. Basics', id: 'tutorial-01' }]
+				items: [
+					{
+						title: '01. Hello World',
+						id: 'tutorial-01',
+						markdown: 'tutorials/01-intro.md',
+						code: 'tutorials/01-intro.fl'
+					}
+				]
 			},
-
 			{
 				title: 'Examples',
 				icon: 'bi bi-journals',
-				items: [{ title: '01. Fibonnachi', id: 'example-01' }]
+				items: [
+					{
+						title: '01. Fibonnacci',
+						id: 'example-01',
+						code: 'examples/fibonacci.fl'
+					}
+				]
 			}
 		]}
 	/>
 
 	<div class="d-flex flex-column w-100">
-		<Nav on:run={run} on:reset={codeEditor.reset} />
+		<Nav
+			on:run={run}
+			on:reset={codeEditor.reset}
+			on:save={codeEditor.save}
+			on:load={codeEditor.load}
+		/>
 		<CodeEditor bind:this={codeEditor} bind:source />
 
 		<Output bind:this={output} />

@@ -1,6 +1,8 @@
 export type MenuItem = {
     title: string,
     id: string,
+    markdown?: string,
+    code?: string,
 }
 
 export type Menu = {

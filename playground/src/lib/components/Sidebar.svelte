@@ -1,19 +1,21 @@
 <script lang="ts">
-	import type { Menu } from '$lib/menu';
-	import { createEventDispatcher, type EventDispatcher } from 'svelte';
+	import type { Menu, MenuItem } from '$lib/menu';
+	import { afterUpdate, createEventDispatcher, type EventDispatcher } from 'svelte';
 
 	export let menu: Menu[];
 	export let content: string | undefined = undefined;
-	export const dispatcher = createEventDispatcher<{ selected: string }>();
+	export const dispatcher = createEventDispatcher<{ selected: MenuItem }>();
 
 	export function setContent(html: string) {
 		content = html;
 	}
+
+	afterUpdate(window.Prism?.highlightAll);
 </script>
 
 <div class="position-relative bg-dark">
-	<div class="collapse collapse-horizontal show" id="collapseExample">
-		<div class=" flex-shrink-0 p-3" style="width: 320px;">
+	<div class="collapse collapse-horizontal show h-100" id="collapseExample">
+		<div class=" flex-shrink-0 p-3 m-0 h-100" style="width: 380px; overflow-y:auto;">
 			<a
 				href="/"
 				class="d-flex align-items-center mb-3 mb-md-0 me-md-auto text-white text-decoration-none"
@@ -47,7 +49,7 @@
 												id={child.id}
 												href="/"
 												class=" text-white"
-												on:click|preventDefault={() => dispatcher('selected', child.id)}
+												on:click|preventDefault={() => dispatcher('selected', child)}
 												>{child.title}</a
 											>
 										</li>
@@ -58,17 +60,19 @@
 					{/each}
 				</ul>
 			{:else}
-				<div>
-					<a
-						href="/"
-						class="icon-link text-decoration-none"
+				<div class="container" style="">
+					<button
+						type="button"
+						class="btn btn-primary btn-sm sticky-top"
+						aria-current="page"
 						on:click|preventDefault={() => (content = undefined)}
 					>
-						<i class="bi bi-arrow-left" /> Back
-					</a>
-				</div>
-				<div class="text-white">
-					{@html content}
+						<i class="bi bi-arrow-left" />
+						Back
+					</button>
+					<div class="content">
+						{@html content}
+					</div>
 				</div>
 			{/if}
 		</div>
@@ -105,5 +109,9 @@
 		padding: 0.1875rem 0.5rem;
 		margin-top: 0.125rem;
 		margin-left: 1.25rem;
+	}
+
+	.content:not(code) {
+		color: white;
 	}
 </style>

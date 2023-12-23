@@ -14,7 +14,7 @@ const config = {
 		adapter: adapter({
 			fallback: 'index.html'
 		}),
-		appDir: 'docs',
+		appDir: 'app',
 		paths: {
 			base: process.env.NODE_ENV === "production" ? "/focus.lang" : ""
 		}
