@@ -1,5 +1,7 @@
 use std::{
     cell::{RefCell, RefMut},
+    error::Error,
+    fmt::Display,
     io::{BufWriter, Write},
     rc::Rc,
 };
@@ -796,17 +798,14 @@ impl<'a> Compiler<'a> {
 #[derive(Debug)]
 pub enum CompilerError {
     ParserError(ParserError),
-    MaxNumberOfRegistersExceeded,
     MaxNumberOfConstsExceeded,
     NotImplemented,
-    UnknownToken,
     EndOfSource,
     UnexpectedLocalAssignment,
     UnexpectedExpression,
     ListInitializerTooLong,
     NameNotFound(String),
     MapInitializerTooLong,
-    CannotUseUnitializedLocal,
     MaxNumberOfLocalsExceeded,
     MaxNumberOfArgsExceeded,
     NotAValidConstant,
@@ -816,5 +815,38 @@ pub enum CompilerError {
 impl From<ParserError> for CompilerError {
     fn from(value: ParserError) -> Self {
         Self::ParserError(value)
+    }
+}
+
+impl Error for CompilerError {}
+
+impl Display for CompilerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CompilerError::ParserError(e) => write!(f, "Parser error: {e}"),
+            CompilerError::MaxNumberOfConstsExceeded => {
+                write!(f, "Max number of constants exceeded")
+            }
+            CompilerError::NotImplemented => write!(f, "Not implemented yet"),
+            CompilerError::EndOfSource => write!(f, "End of source"),
+            CompilerError::UnexpectedLocalAssignment => write!(f, "Unexpected local assignment"),
+            CompilerError::UnexpectedExpression => write!(f, "Unexpected expression"),
+            CompilerError::ListInitializerTooLong => write!(f, "List initializer too long"),
+            CompilerError::NameNotFound(name) => write!(f, "Name `{name}` not found"),
+            CompilerError::MapInitializerTooLong => write!(f, "Map initializer too long"),
+            CompilerError::MaxNumberOfLocalsExceeded => write!(f, "Max number of locals exceeded"),
+            CompilerError::MaxNumberOfArgsExceeded => write!(f, "Max number of args exceeded"),
+            CompilerError::NotAValidConstant => write!(f, "Not a valid constant"),
+            CompilerError::CannotSetTheValueOfAModule => {
+                write!(f, "Cannot set the value in another module")
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Into<wasm_bindgen::JsValue> for CompilerError {
+    fn into(self) -> wasm_bindgen::JsValue {
+        wasm_bindgen::JsValue::from_str(&self.to_string())
     }
 }

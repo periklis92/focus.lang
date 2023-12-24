@@ -1,7 +1,7 @@
 use std::{io::Write, path::Path, rc::Rc};
 
 use crate::{
-    compiler::Compiler,
+    compiler::{Compiler, CompilerError},
     op::{ConstIdx, OpCode},
     stdlib,
     value::{Closure, NativeFunction, Value},
@@ -32,12 +32,16 @@ impl ModuleLoader {
         }
     }
 
-    pub fn load_module_from_source(&mut self, ident: &str, source: &str) -> usize {
+    pub fn load_module_from_source(
+        &mut self,
+        ident: &str,
+        source: &str,
+    ) -> Result<usize, CompilerError> {
         let compiler = Compiler::new(source, self);
-        let module = Rc::new(compiler.compile_module(ident).unwrap());
+        let module = Rc::new(compiler.compile_module(ident)?);
         let index = self.modules.len();
         self.modules.push(module.clone());
-        index
+        Ok(index)
     }
 }
 

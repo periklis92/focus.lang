@@ -34,23 +34,15 @@ fn main() -> Result<(), RunCliError> {
         return Err(RunCliError::MissingInput);
     };
 
-    let mut module_loader = ModuleLoader::new("");
-    module_loader.add_modules(stdlib::modules());
-    module_loader.load_module(&input_filename);
+    let source = std::fs::read_to_string(&input_filename).map_err(RunCliError::ReadWriteError)?;
 
-    let mut out = File::create(Path::new(&input_filename).with_extension("flb"))
+    let out = File::create(Path::new(&input_filename).with_extension("flb"))
         .map_err(RunCliError::FileError)?;
-    module_loader
-        .module_at(4)
-        .unwrap()
-        .dump(&mut out)
-        .map_err(|e| RunCliError::ReadWriteError(e))?;
 
-    let module = module_loader
-        .load_module_from_source("test", "let main () = Io.printf \"Hello World: {(2)}\"");
-    let mut interpreter = Vm::new(module_loader);
-    interpreter.execute_module(module, "main")?;
-    let last_value = interpreter.stack().last().unwrap();
+    let mut vm = Vm::new_with_std();
+    let result = vm.load_from_source("main", &source)?;
+    vm.execute_module(result, "main")?;
+    let last_value = vm.stack().last().unwrap();
     println!("{last_value}");
 
     Ok(())

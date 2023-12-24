@@ -29,7 +29,8 @@
 				vm.add_event_listener('log', (data: CustomEvent<string>) => {
 					output.log(data.detail);
 				});
-				vm.execute_from_source(source);
+				let index = vm.load_from_source('main', source);
+				vm.execute_module(index, 'main');
 			} catch (error) {
 				console.error(error);
 				output.log(error as string);

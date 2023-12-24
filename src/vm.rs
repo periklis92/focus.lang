@@ -2,6 +2,7 @@ use core::panic;
 use std::{cell::RefCell, error::Error, fmt::Display, rc::Rc, usize};
 
 use crate::{
+    compiler::CompilerError,
     op::OpCode,
     state::{Module, ModuleLoader, ModuleValue},
     stdlib,
@@ -65,13 +66,13 @@ impl Vm {
             stack: Vec::with_capacity(STACK_SIZE * NUM_FRAMES),
             open_upvalues: Vec::new(),
             module_loader,
+            #[cfg(target_arch = "wasm32")]
             event_emitter: web_sys::EventTarget::new().unwrap(),
         }
     }
 
-    pub fn execute_from_source(&mut self, source: &str) -> Result<(), RuntimeError> {
-        let index = self.module_loader.load_module_from_source("main", source);
-        self.execute_module(index, "main")
+    pub fn load_from_source(&mut self, ident: &str, source: &str) -> Result<usize, CompilerError> {
+        self.module_loader.load_module_from_source(ident, source)
     }
 
     pub fn execute_module(&mut self, index: usize, ident: &str) -> Result<(), RuntimeError> {

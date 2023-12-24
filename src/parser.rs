@@ -1,3 +1,5 @@
+use std::{error::Error, fmt::Display};
+
 use crate::{
     ast::{
         ArithmeticOperator, BooleanOperator, ComparisonOperator, Expression, Import, ImportSource,
@@ -604,7 +606,6 @@ pub enum ParserError {
     UnknownToken,
     EndOfSource,
     UnexpectedToken(TokenType, TokenType),
-    UninitializedGlobal,
     ExpectedBlock,
     ReservedKeywordAsIdent,
     NotAPrimaryExpression,
@@ -619,6 +620,46 @@ pub enum ParserError {
     FoundExpressionWhenStatementWasExpected,
     TopLevelExpressionNotAllowed,
     NotImplemented,
+}
+
+impl Error for ParserError {}
+
+impl Display for ParserError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ParserError::UnknownToken => write!(f, "Unknown token"),
+            ParserError::EndOfSource => write!(f, "End of source"),
+            ParserError::UnexpectedToken(t1, t2) => {
+                write!(f, "Unexpected token: {t2}, Expected: {t1}")
+            }
+            ParserError::ExpectedBlock => write!(f, "Expected block"),
+            ParserError::ReservedKeywordAsIdent => write!(f, "Reserved keyword as ident"),
+            ParserError::NotAPrimaryExpression => write!(f, "Not a primary expression"),
+            ParserError::UnableToParseNumber(n) => write!(f, "Unable to parse number: {n}"),
+            ParserError::UnableToParseInt(i) => write!(f, "Unable to parse integer: {i}"),
+            ParserError::InvalidIndentation => write!(f, "Invalid indentation"),
+            ParserError::UnexpectedTokenOneOf(t1, t2) => {
+                write!(f, "Unexpected token: {t2}. Expected one of: ")?;
+                for t in t1 {
+                    write!(f, "{t} ")?;
+                }
+                Ok(())
+            }
+            ParserError::EarlyEos => write!(f, "Early end of source"),
+            ParserError::InvalidEmptySpace => write!(f, "Invalid empty space"),
+            ParserError::UnexpectedExpression(expr) => write!(f, "Unexpected expression {expr}"),
+            ParserError::FoundStatementWhereExpressionWasExpected => {
+                write!(f, "Found statement where expression was expected")
+            }
+            ParserError::FoundExpressionWhenStatementWasExpected => {
+                write!(f, "Found expression where statement was expected")
+            }
+            ParserError::TopLevelExpressionNotAllowed => {
+                write!(f, "Top level expresion not allowed")
+            }
+            ParserError::NotImplemented => write!(f, "Not implemented"),
+        }
+    }
 }
 
 #[cfg(test)]

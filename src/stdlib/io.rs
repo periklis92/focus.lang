@@ -15,7 +15,8 @@ fn print(vm: &mut Vm) -> Result<Value, RuntimeError> {
         let arg = vm.pop();
         string.insert_str(0, &arg.to_string());
     }
-    if cfg!(target_arch = "wasm32") {
+    #[cfg(target_arch = "wasm32")]
+    {
         vm.event_target()
             .dispatch_event(
                 &web_sys::CustomEvent::new_with_event_init_dict(
@@ -25,7 +26,9 @@ fn print(vm: &mut Vm) -> Result<Value, RuntimeError> {
                 .unwrap(),
             )
             .unwrap();
-    } else {
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
         println!("{}", string);
     }
     Ok(Value::Unit)
@@ -39,7 +42,8 @@ fn printf(vm: &mut Vm) -> Result<Value, RuntimeError> {
     match arg {
         Value::Table(table) => {
             let string = format_to_string(table);
-            if cfg!(target_arch = "wasm32") {
+            #[cfg(target_arch = "wasm32")]
+            {
                 vm.event_target()
                     .dispatch_event(
                         &web_sys::CustomEvent::new_with_event_init_dict(
@@ -50,7 +54,9 @@ fn printf(vm: &mut Vm) -> Result<Value, RuntimeError> {
                     )
                     .unwrap();
                 web_sys::console::log_2(&"from rust: ".into(), &string.into());
-            } else {
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
                 println!("{}", string);
             }
         }
