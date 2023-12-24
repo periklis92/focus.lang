@@ -2,8 +2,6 @@ use std::{fs::File, path::Path};
 
 use focus_lang::{
     compiler::CompilerError,
-    state::ModuleLoader,
-    stdlib,
     vm::{RuntimeError, Vm},
 };
 
@@ -36,12 +34,19 @@ fn main() -> Result<(), RunCliError> {
 
     let source = std::fs::read_to_string(&input_filename).map_err(RunCliError::ReadWriteError)?;
 
-    let out = File::create(Path::new(&input_filename).with_extension("flb"))
+    let mut out = File::create(Path::new(&input_filename).with_extension("flb"))
         .map_err(RunCliError::FileError)?;
 
     let mut vm = Vm::new_with_std();
     let result = vm.load_from_source("main", &source)?;
     vm.execute_module(result, "main")?;
+
+    vm.module_loader()
+        .module_at(result)
+        .unwrap()
+        .dump(&mut out)
+        .map_err(RunCliError::ReadWriteError)?;
+
     let last_value = vm.stack().last().unwrap();
     println!("{last_value}");
 
