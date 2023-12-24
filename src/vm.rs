@@ -88,6 +88,10 @@ impl Vm {
 }
 
 impl Vm {
+    pub fn module_loader(&self) -> &ModuleLoader {
+        &self.module_loader
+    }
+
     fn load_module(&mut self, module: Rc<Module>) -> Result<(), RuntimeError> {
         let module = Rc::new(module);
         match &module.value {
@@ -649,7 +653,6 @@ impl Vm {
         self.frames.push(frame);
         let result = (closure.function.native().unwrap().function)(self)?;
         let frame = self.frames.pop().unwrap();
-        self.pop();
         if self.frames.is_empty() {
             return Ok(());
         }
