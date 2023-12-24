@@ -1,9 +1,14 @@
 <script lang="ts">
-	type LogMessage = { message: String; timestamp: Date };
+	type LogMessage = { message: String; timestamp: Date; isError?: boolean };
 	export let output: LogMessage[] = [];
 
 	export function log(message: string) {
 		output.push({ timestamp: new Date(), message });
+		output = output;
+	}
+
+	export function logError(message: string) {
+		output.push({ timestamp: new Date(), message, isError: true });
 		output = output;
 	}
 </script>
@@ -12,7 +17,7 @@
 	<span class="bg-body-tertiary bg-dark" data-bs-theme="dark"><div class="mx-1">Output</div></span>
 	<div class="output-text-area" contenteditable="false">
 		{#each output as line}
-			<div class="border-bottom border-secondary w-100 bg-dark">
+			<div class="border-bottom border-secondary w-100 bg-dark" class:text-danger={line.isError}>
 				{line.timestamp.toLocaleTimeString()}: {line.message}
 			</div>
 		{/each}

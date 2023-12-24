@@ -33,7 +33,7 @@
 				vm.execute_module(index, 'main');
 			} catch (error) {
 				console.error(error);
-				output.log(error as string);
+				output.logError(error as string);
 			}
 		}
 	}
