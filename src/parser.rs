@@ -15,6 +15,7 @@ pub struct Parser<'a> {
     last_expr_start_position: usize,
     last_expr_line: usize,
     depth: usize,
+    call_depth: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -24,6 +25,7 @@ impl<'a> Parser<'a> {
             last_expr_start_position: 0,
             last_expr_line: 0,
             depth: 0,
+            call_depth: 0,
         }
     }
 
@@ -94,9 +96,9 @@ impl<'a> Parser<'a> {
         let token = self.lexer.peek();
         self.last_expr_start_position = self.lexer.position();
         self.last_expr_line = self.lexer.line();
-        match token {
-            TokenType::Let => self.r#let(),
-            TokenType::From => Err(ParserError::NotImplemented),
+        let statement = match token {
+            TokenType::Let => self.r#let()?,
+            TokenType::From => return Err(ParserError::NotImplemented),
             TokenType::Import => {
                 self.lexer.next();
 
@@ -111,19 +113,21 @@ impl<'a> Parser<'a> {
                         _ => unreachable!(),
                     }
                 } else {
-                    todo!()
+                    return Err(ParserError::NotImplemented);
                 };
 
-                Ok(Statement::Import {
+                Statement::Import {
                     source,
                     imports: vec![Import::All { alias: None }],
-                })
+                }
             }
-            TokenType::Eos => Err(ParserError::EndOfSource),
-            TokenType::Unknown => Err(ParserError::UnknownToken),
-            _ if self.depth == 0 => Err(ParserError::TopLevelExpressionNotAllowed),
-            _ => Ok(Statement::Expression(self.expression()?)),
-        }
+            TokenType::Eos => return Err(ParserError::EndOfSource),
+            TokenType::Unknown => return Err(ParserError::UnknownToken),
+            _ if self.depth == 0 => return Err(ParserError::TopLevelExpressionNotAllowed),
+            _ => Statement::Expression(self.expression()?),
+        };
+
+        Ok(statement)
     }
 
     fn expression(&mut self) -> Result<Expression, ParserError> {
@@ -206,21 +210,30 @@ impl<'a> Parser<'a> {
             }
             TokenType::Function => self.function_expression(),
             TokenType::Ident => {
-                if self.is_call()? {
+                if self.call_depth == 0 && self.is_call()? {
                     self.call()
                 } else {
                     self.path()
                 }
             }
             TokenType::LParen => {
+                let mut dec = false;
+                if self.call_depth > 0 {
+                    dec = true;
+                    self.call_depth -= 1;
+                }
                 let expr = if self.is_call()? {
                     self.lexer.next();
-                    self.call()?
+                    let expr = self.call()?;
+                    expr
                 } else {
                     self.lexer.next();
                     self.lexer.skip_new_lines();
                     self.expression()?
                 };
+                if dec {
+                    self.call_depth += 1;
+                }
                 self.expect(TokenType::RParen)?;
                 Ok(expr)
             }
@@ -275,7 +288,11 @@ impl<'a> Parser<'a> {
                 TokenType::DoubleQuote => self.string()?,
                 token => {
                     return Err(ParserError::UnexpectedTokenOneOf(
-                        vec![TokenType::DoubleQuote, TokenType::Ident],
+                        vec![
+                            TokenType::DoubleQuote,
+                            TokenType::Ident,
+                            TokenType::LBracket,
+                        ],
                         token,
                     ))
                 }
@@ -288,6 +305,7 @@ impl<'a> Parser<'a> {
             if self.lexer.next_checked(TokenType::Comma).is_none() {
                 break;
             }
+            self.lexer.skip_new_lines();
         }
         self.expect(TokenType::RCurly)?;
         Ok(Expression::Table(table))
@@ -377,6 +395,9 @@ impl<'a> Parser<'a> {
                     .is_some_and(|t| t.token_type.is_primary() && t.token_type != TokenType::Minus))
             }
             TokenType::LParen => {
+                if cloned.call_depth > 0 {
+                    cloned.call_depth -= 1;
+                }
                 cloned.lexer.next();
                 cloned.expression()?;
                 cloned.lexer.skip_new_lines();
@@ -481,6 +502,7 @@ impl<'a> Parser<'a> {
     }
 
     fn call_simple(&mut self) -> Result<Expression, ParserError> {
+        self.call_depth += 1;
         let callee = self.callee()?.into();
         let mut args = Vec::new();
 
@@ -490,6 +512,7 @@ impl<'a> Parser<'a> {
             args.push(arg);
         }
 
+        self.call_depth -= 1;
         Ok(Expression::Call { callee, args })
     }
 
