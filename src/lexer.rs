@@ -82,8 +82,11 @@ impl<'a> Lexer<'a> {
     pub fn peek_indentation(&self) -> usize {
         let mut l = self.clone();
         l.skip_new_lines();
-        l.next();
-        l.indentation
+        if l.next().token_type == TokenType::Eos {
+            return 0;
+        } else {
+            l.indentation
+        }
     }
 
     pub fn peek_nth(&self, n: usize) -> TokenType {
