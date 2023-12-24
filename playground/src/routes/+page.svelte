@@ -65,6 +65,16 @@
 						id: 'tutorial-01',
 						markdown: 'tutorials/01-intro.md',
 						code: 'tutorials/01-intro.fl'
+					},
+					{
+						title: '02. Variables',
+						id: 'tutorial-02',
+						markdown: 'tutorials/02-variables.md'
+					},
+					{
+						title: '03. Functions',
+						id: 'tutorial-03',
+						markdown: 'tutorials/03-functions.md'
 					}
 				]
 			},

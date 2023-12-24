@@ -15,7 +15,8 @@ let main () = Io.print "Hello World"
 
 ## Using `modules`
 
-In order to print "Hello World" to the console, we need to use the built-in module `Io`. Modules can contain a number of function and/or values.
+In order to print "Hello World" to the console, we need to use the built-in module `Io`. Modules are organizational units that contain functions and/or values.
+
 Here we call the function `print`.
 
 Try to `Run` *(button in the top right or `F5`)* the program and see the output in the console below.
