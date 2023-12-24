@@ -630,24 +630,26 @@ impl Display for ParserError {
             ParserError::UnknownToken => write!(f, "Unknown token"),
             ParserError::EndOfSource => write!(f, "End of source"),
             ParserError::UnexpectedToken(t1, t2) => {
-                write!(f, "Unexpected token: {t2}, Expected: {t1}")
+                write!(f, "Unexpected token: `{t2}`, Expected: `{t1}`")
             }
             ParserError::ExpectedBlock => write!(f, "Expected block"),
             ParserError::ReservedKeywordAsIdent => write!(f, "Reserved keyword as ident"),
             ParserError::NotAPrimaryExpression => write!(f, "Not a primary expression"),
-            ParserError::UnableToParseNumber(n) => write!(f, "Unable to parse number: {n}"),
-            ParserError::UnableToParseInt(i) => write!(f, "Unable to parse integer: {i}"),
+            ParserError::UnableToParseNumber(n) => write!(f, "Unable to parse number: `{n}`"),
+            ParserError::UnableToParseInt(i) => write!(f, "Unable to parse integer: `{i}`"),
             ParserError::InvalidIndentation => write!(f, "Invalid indentation"),
             ParserError::UnexpectedTokenOneOf(t1, t2) => {
-                write!(f, "Unexpected token: {t2}. Expected one of: ")?;
+                write!(f, "Unexpected token: `{t2}`. Expected one of: `")?;
                 for t in t1 {
                     write!(f, "{t} ")?;
                 }
+                write!(f, "`")?;
+
                 Ok(())
             }
             ParserError::EarlyEos => write!(f, "Early end of source"),
             ParserError::InvalidEmptySpace => write!(f, "Invalid empty space"),
-            ParserError::UnexpectedExpression(expr) => write!(f, "Unexpected expression {expr}"),
+            ParserError::UnexpectedExpression(expr) => write!(f, "Unexpected expression `{expr}`"),
             ParserError::FoundStatementWhereExpressionWasExpected => {
                 write!(f, "Found statement where expression was expected")
             }
