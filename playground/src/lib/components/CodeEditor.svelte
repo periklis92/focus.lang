@@ -1,10 +1,9 @@
 <script lang="ts">
-	const defaultSource = `let main () = Io.print "Hello World"`;
-	export let source: string = localStorage.getItem('code') ?? defaultSource;
-	let editor: HTMLDivElement;
+	export let source: string = localStorage.getItem('code') ?? '';
+	let editor: HTMLElement;
 
 	export async function reset() {
-		source = defaultSource;
+		source = '';
 		localStorage.removeItem('code');
 	}
 
@@ -24,12 +23,30 @@
 			var sel = doc?.getSelection();
 
 			if (!sel) return;
-			console.log(sel);
 			for (let i = 0; i < sel.rangeCount; i++) {
 				const range = sel.getRangeAt(i);
-				console.log(range);
-
 				var tabNode = document.createTextNode('\t');
+				range?.insertNode(tabNode);
+				range?.setStartAfter(tabNode);
+				range?.setEndAfter(tabNode);
+				sel?.addRange(range);
+			}
+		}
+	}
+
+	function handlePaste(e: ClipboardEvent) {
+		e.preventDefault();
+		e.stopPropagation();
+
+		const clipboardData = e.clipboardData?.getData('Text');
+		if (clipboardData) {
+			const doc = editor.ownerDocument.defaultView;
+			var sel = doc?.getSelection();
+
+			if (!sel) return;
+			for (let i = 0; i < sel.rangeCount; i++) {
+				const range = sel.getRangeAt(i);
+				var tabNode = document.createTextNode(clipboardData as string);
 				range?.insertNode(tabNode);
 				range?.setStartAfter(tabNode);
 				range?.setEndAfter(tabNode);
@@ -48,6 +65,7 @@
 		placeholder="Insert code here..."
 		style="white-space: pre;"
 		on:keydown={handleKey}
+		on:paste={handlePaste}
 		role="textbox"
 		tabindex="0"
 	></div>

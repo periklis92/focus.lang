@@ -18,7 +18,7 @@
 	<div class="output-text-area" contenteditable="false">
 		{#each output as line}
 			<div class="border-bottom border-secondary w-100 bg-dark" class:text-danger={line.isError}>
-				{line.timestamp.toLocaleTimeString()}: {line.message}
+				<span class="text-primary">{line.timestamp.toLocaleTimeString()}</span>: {line.message}
 			</div>
 		{/each}
 	</div>

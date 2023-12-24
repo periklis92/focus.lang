@@ -11,17 +11,40 @@
 	}
 
 	afterUpdate(window.Prism?.highlightAll);
+
+	let sidebarWidth = '380px';
+	let sidebarWidthLabel = 'Expand';
+	let sidebarWidthIcon = 'bi-arrows-angle-expand';
 </script>
 
 <div class="position-relative bg-dark">
 	<div class="collapse collapse-horizontal show h-100" id="collapseExample">
-		<div class=" flex-shrink-0 p-3 m-0 h-100" style="width: 380px; overflow-y:auto;">
+		<div class="flex-shrink-0 p-3 m-0 h-100" style="overflow-y:auto;" style:width={sidebarWidth}>
 			<a
 				href="/"
 				class="d-flex align-items-center mb-3 mb-md-0 me-md-auto text-white text-decoration-none"
 			>
 				<span class="fs-4">Menu</span>
 			</a>
+			<button
+				type="button"
+				class="btn btn-primary btn-sm"
+				aria-current="page"
+				on:click={() => {
+					if (sidebarWidth === '380px') {
+						sidebarWidth = '580px';
+						sidebarWidthLabel = 'Shrink';
+						sidebarWidthIcon = 'bi-arrows-angle-contract';
+					} else {
+						sidebarWidth = '380px';
+						sidebarWidthLabel = 'Expand';
+						sidebarWidthIcon = 'bi-arrows-angle-expand';
+					}
+				}}
+			>
+				<i class={`bi ${sidebarWidthIcon}`} />
+				{sidebarWidthLabel}
+			</button>
 			<hr />
 			{#if !content}
 				<ul class="nav nav-pills flex-column mb-auto">
@@ -65,7 +88,7 @@
 						type="button"
 						class="btn btn-primary btn-sm sticky-top"
 						aria-current="page"
-						on:click|preventDefault={() => (content = undefined)}
+						on:click={() => (content = undefined)}
 					>
 						<i class="bi bi-arrow-left" />
 						Back
