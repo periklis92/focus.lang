@@ -13,7 +13,7 @@ function is a function with side effects, that takes no real arguments. This is 
 let main () = Io.print "Hello World"
 ```
 
-## Using Modules
+## Using `modules`
 
 In order to print "Hello World" to the console, we need to use the built-in module `Io`. Modules can contain a number of function and/or values.
 Here we call the function `print`.

@@ -35,9 +35,11 @@ export class Vm {
 */
   static new_with_std(): Vm;
 /**
+* @param {string} ident
 * @param {string} source
+* @returns {number}
 */
-  execute_from_source(source: string): void;
+  load_from_source(ident: string, source: string): number;
 /**
 * @param {number} index
 * @param {string} ident
@@ -53,11 +55,11 @@ export interface InitOutput {
   readonly vm_add_event_listener: (a: number, b: number, c: number, d: number) => void;
   readonly vm_new: (a: number) => number;
   readonly vm_new_with_std: () => number;
-  readonly vm_execute_from_source: (a: number, b: number, c: number, d: number) => void;
+  readonly vm_load_from_source: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
   readonly vm_execute_module: (a: number, b: number, c: number, d: number, e: number) => void;
   readonly __wbg_moduleloader_free: (a: number) => void;
   readonly moduleloader_new: (a: number, b: number) => number;
-  readonly moduleloader_load_module_from_source: (a: number, b: number, c: number, d: number, e: number) => number;
+  readonly moduleloader_load_module_from_source: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
   readonly __wbindgen_malloc: (a: number, b: number) => number;
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
   readonly __wbindgen_add_to_stack_pointer: (a: number) => number;
