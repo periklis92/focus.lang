@@ -7,6 +7,8 @@
 	let editor: HTMLElement;
 	let aceEditor: ace.Editor;
 
+	const defaultCode = `let main () = Io.print "Hello World"`;
+
 	export function setSource(source: string) {
 		aceEditor.setValue(source);
 	}
@@ -23,7 +25,7 @@
 	});
 
 	export async function reset() {
-		setSource('');
+		setSource(defaultCode);
 		localStorage.removeItem('code');
 	}
 
@@ -32,7 +34,7 @@
 	}
 
 	export function load() {
-		setSource(localStorage.getItem('code') ?? getSource());
+		setSource(localStorage.getItem('code') ?? defaultCode);
 	}
 </script>
 
