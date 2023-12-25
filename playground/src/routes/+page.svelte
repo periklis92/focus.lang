@@ -69,12 +69,14 @@
 					{
 						title: '02. Variables',
 						id: 'tutorial-02',
-						markdown: 'tutorials/02-variables.md'
+						markdown: 'tutorials/02-variables.md',
+						code: 'tutorials/02-variables.fl'
 					},
 					{
 						title: '03. Functions',
 						id: 'tutorial-03',
-						markdown: 'tutorials/03-functions.md'
+						markdown: 'tutorials/03-functions.md',
+						code: 'tutorials/03-functions.fl'
 					}
 				]
 			},
