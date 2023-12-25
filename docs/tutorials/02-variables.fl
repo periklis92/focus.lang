@@ -1,0 +1,8 @@
+let unit = ()
+let int = 2
+let float = 4.3
+let array = [1, 2, 3]
+let table = { a: 2 }
+
+
+let main () = ()

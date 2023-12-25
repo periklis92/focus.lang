@@ -1,0 +1,6 @@
+
+let function a = a
+
+let anonymous = fn a -> a
+
+let main () = ()
