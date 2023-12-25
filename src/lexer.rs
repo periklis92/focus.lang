@@ -227,6 +227,7 @@ impl<'a> Lexer<'a> {
                 self.column = 0;
                 TokenType::NewLine
             }
+            '#' => TokenType::Hash,
             ':' => TokenType::Colon,
             ',' => TokenType::Comma,
             '!' if self.next_char_checked('=') => TokenType::NotEqual,
@@ -311,6 +312,26 @@ impl<'a> Lexer<'a> {
     pub fn skip_new_lines(&mut self) {
         while self.peek() == TokenType::NewLine {
             self.next();
+        }
+    }
+
+    pub fn skip_line(&mut self) {
+        while self.peek() != TokenType::NewLine {
+            self.next();
+        }
+        self.next();
+    }
+
+    pub fn skip_comments_and_new_lines(&mut self) {
+        loop {
+            let peek = self.peek();
+            if peek == TokenType::Hash {
+                self.skip_line();
+            } else if peek == TokenType::NewLine {
+                self.skip_new_lines();
+            } else {
+                break;
+            }
         }
     }
 

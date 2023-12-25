@@ -69,6 +69,7 @@ macro_rules! token_types {
 token_types!(
     Unit "()",
     Empty "<empty>",
+    Hash "#",
     Colon ":",
     Comma ",",
     SingleQuote "'",

@@ -92,7 +92,7 @@ impl<'a> Parser<'a> {
     }
 
     fn statement(&mut self) -> Result<Statement, ParserError> {
-        self.lexer.skip_new_lines();
+        self.lexer.skip_comments_and_new_lines();
         let token = self.lexer.peek();
         self.last_expr_start_position = self.lexer.position();
         self.last_expr_line = self.lexer.line();
@@ -146,7 +146,7 @@ impl<'a> Parser<'a> {
             self.lexer.next_indented();
             let indentation = self.lexer.indentation();
             if self.lexer.next_checked(TokenType::NewLine).is_some() {
-                self.lexer.skip_new_lines();
+                self.lexer.skip_comments_and_new_lines();
                 let next_indentation = self.lexer.peek_indentation();
                 if next_indentation <= indentation {
                     return Err(ParserError::InvalidIndentation);
@@ -228,7 +228,7 @@ impl<'a> Parser<'a> {
                     expr
                 } else {
                     self.lexer.next();
-                    self.lexer.skip_new_lines();
+                    self.lexer.skip_comments_and_new_lines();
                     self.expression()?
                 };
                 if dec {
@@ -239,7 +239,7 @@ impl<'a> Parser<'a> {
             }
             TokenType::LBracket => {
                 self.lexer.next();
-                self.lexer.skip_new_lines();
+                self.lexer.skip_comments_and_new_lines();
                 let mut arr = Vec::new();
                 while self.lexer.peek() != TokenType::RBracket
                     && self.lexer.peek() != TokenType::Eos
@@ -272,7 +272,7 @@ impl<'a> Parser<'a> {
     fn table(&mut self) -> Result<Expression, ParserError> {
         self.expect(TokenType::LCurly)?;
         let mut table = Vec::new();
-        self.lexer.skip_new_lines();
+        self.lexer.skip_comments_and_new_lines();
         while self.lexer.peek() != TokenType::RCurly && self.lexer.peek() != TokenType::Eos {
             let key = match self.lexer.peek() {
                 TokenType::LBracket => {
@@ -298,14 +298,14 @@ impl<'a> Parser<'a> {
                 }
             };
             self.expect(TokenType::Colon)?;
-            self.lexer.skip_new_lines();
+            self.lexer.skip_comments_and_new_lines();
             let value = self.expression()?;
             table.push(TableEntry { key, value });
-            self.lexer.skip_new_lines();
+            self.lexer.skip_comments_and_new_lines();
             if self.lexer.next_checked(TokenType::Comma).is_none() {
                 break;
             }
-            self.lexer.skip_new_lines();
+            self.lexer.skip_comments_and_new_lines();
         }
         self.expect(TokenType::RCurly)?;
         Ok(Expression::Table(table))
@@ -400,7 +400,7 @@ impl<'a> Parser<'a> {
                 }
                 cloned.lexer.next();
                 cloned.expression()?;
-                cloned.lexer.skip_new_lines();
+                cloned.lexer.skip_comments_and_new_lines();
                 cloned.expect(TokenType::RParen)?;
                 Ok(cloned
                     .lexer
@@ -507,7 +507,7 @@ impl<'a> Parser<'a> {
         let mut args = Vec::new();
 
         while self.lexer.peek_indented().is_some_and(|t| t.is_primary()) {
-            self.lexer.skip_new_lines();
+            self.lexer.skip_comments_and_new_lines();
             let arg = self.primary()?;
             args.push(arg);
         }
