@@ -11,6 +11,7 @@
 
 	export function setSource(source: string) {
 		aceEditor.setValue(source);
+		aceEditor.selection.clearSelection();
 	}
 
 	export function getSource(): string {
