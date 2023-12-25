@@ -1,71 +1,46 @@
 <script lang="ts">
-	export let source: string = localStorage.getItem('code') ?? '';
+	import ace from 'brace';
+	import '$lib/focus';
+	import 'brace/theme/monokai';
+	import { onMount } from 'svelte';
+
 	let editor: HTMLElement;
+	let aceEditor: ace.Editor;
+
+	export function setSource(source: string) {
+		aceEditor.setValue(source);
+	}
+
+	export function getSource(): string {
+		return aceEditor.getValue();
+	}
+
+	onMount(async () => {
+		aceEditor = ace.edit(editor);
+		aceEditor.getSession().setMode('ace/mode/focus');
+		aceEditor.setTheme('ace/theme/monokai');
+		load();
+	});
 
 	export async function reset() {
-		source = '';
+		setSource('');
 		localStorage.removeItem('code');
 	}
 
 	export function save() {
-		localStorage.setItem('code', source);
+		localStorage.setItem('code', getSource());
 	}
 
 	export function load() {
-		source = localStorage.getItem('code') ?? source;
-	}
-
-	function handleKey(e: KeyboardEvent) {
-		if (e.key === 'Tab') {
-			e.preventDefault();
-
-			const doc = editor.ownerDocument.defaultView;
-			var sel = doc?.getSelection();
-
-			if (!sel) return;
-			for (let i = 0; i < sel.rangeCount; i++) {
-				const range = sel.getRangeAt(i);
-				var tabNode = document.createTextNode('\t');
-				range?.insertNode(tabNode);
-				range?.setStartAfter(tabNode);
-				range?.setEndAfter(tabNode);
-				sel?.addRange(range);
-			}
-		}
-	}
-
-	function handlePaste(e: ClipboardEvent) {
-		e.preventDefault();
-		e.stopPropagation();
-
-		const clipboardData = e.clipboardData?.getData('Text');
-		if (clipboardData) {
-			const doc = editor.ownerDocument.defaultView;
-			var sel = doc?.getSelection();
-
-			if (!sel) return;
-			for (let i = 0; i < sel.rangeCount; i++) {
-				const range = sel.getRangeAt(i);
-				var tabNode = document.createTextNode(clipboardData as string);
-				range?.insertNode(tabNode);
-				range?.setStartAfter(tabNode);
-				range?.setEndAfter(tabNode);
-				sel?.addRange(range);
-			}
-		}
+		setSource(localStorage.getItem('code') ?? getSource());
 	}
 </script>
 
-<div class="d-flex text-bg-dark w-100 px-1 pt-2" style="height: 85%;">
+<div class="d-flex text-bg-dark w-100" style="height: 85%;">
 	<div
 		bind:this={editor}
 		contenteditable="true"
 		class="code-editor"
-		bind:innerText={source}
-		placeholder="Insert code here..."
-		style="white-space: pre;"
-		on:keydown={handleKey}
-		on:paste={handlePaste}
 		role="textbox"
 		tabindex="0"
 	></div>
@@ -77,9 +52,7 @@
 		border: 0;
 		width: 100%;
 		height: 100%;
-		color: white;
 		outline: 0;
-		resize: none;
 		padding: 0;
 		margin: 0;
 		font-family: var(--bs-font-monospace);

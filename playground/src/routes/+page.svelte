@@ -12,7 +12,6 @@
 	let sidebar: Sidebar;
 	let codeEditor: CodeEditor;
 	let output: Output;
-	let source: string;
 
 	document.addEventListener('keydown', (e) => {
 		if (e.ctrlKey && e.key === 's') {
@@ -23,13 +22,14 @@
 	});
 
 	function run() {
-		if (source) {
+		let source = codeEditor.getSource();
+		if (source.length > 0) {
 			try {
 				const vm = Vm.new_with_std();
 				vm.add_event_listener('log', (data: CustomEvent<string>) => {
 					output.log(data.detail);
 				});
-				let index = vm.load_from_source('main', source);
+				let index = vm.load_from_source('main', codeEditor.getSource());
 				vm.execute_module(index, 'main');
 			} catch (error) {
 				console.error(error);
@@ -46,7 +46,7 @@
 
 		if (item.detail.code) {
 			const code = await (await fetch(`${base}/${item.detail.code}`)).text();
-			source = code;
+			codeEditor.setSource(code);
 		}
 	}
 </script>
@@ -101,7 +101,7 @@
 			on:save={codeEditor.save}
 			on:load={codeEditor.load}
 		/>
-		<CodeEditor bind:this={codeEditor} bind:source />
+		<CodeEditor bind:this={codeEditor} />
 
 		<Output bind:this={output} />
 	</div>

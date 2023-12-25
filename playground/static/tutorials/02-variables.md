@@ -13,7 +13,7 @@ There are 7 main types of values in `focus`.
 - Number `1.1`, `1.2`: A floating point number
 - Array `[...]`: An ordered collection of values
 - Table `{...}`: An assosiative array
-- Function `fn <args> -> <code>` An executable piece of code
+- Function `fn <args> -> <code>`: An executable piece of code
 
 Functions are a first class citizen in focus so they can be stored and accesed through variables. We'll talk more about them in the next chapter.
 
@@ -22,7 +22,7 @@ Arrays in `focus` are initialized using the square brackets `[]` and they can co
 ```focus
 let empty_array = []
 let simple_array = [1, 2, 3]
-let different_types = [1, true, empty_array, simple_array]
+let different_types = [1, true, empty_array, simple_array] # [1, true, [], [1, 2, 3]]
 ```
 
 ## Tables
@@ -36,7 +36,7 @@ let table = {
 }
 
 table.true # Not valid. true is a keyword
-table["true"] # 1. Valid
+table["true"] # Valid. 1
 table[true] # 2
 table.another_key # 3
 table["another_key"] # 3
