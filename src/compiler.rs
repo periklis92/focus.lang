@@ -767,15 +767,29 @@ impl<'a> Compiler<'a> {
     fn emit_jump(&mut self, op_code: OpCode) -> usize {
         let index = self.state().prototype.code.len();
         self.emit_code(op_code);
+        self.emit_code(OpCode::ExtraArg(0));
         index
     }
 
     fn patch_jump(&mut self, index: usize) {
-        let len = self.state().prototype.code.len() - 1 - index;
-        let code = &mut self.state_mut().prototype.code[index];
-        match code {
-            OpCode::Jump(ref mut index) => *index = len as u8,
-            OpCode::JumpIfFalse(ref mut index) => *index = len as u8,
+        let len = self.state().prototype.code.len() - 2 - index;
+        {
+            let code = &mut self.state_mut().prototype.code[index];
+            match code {
+                OpCode::Jump(ref mut index) => {
+                    *index = len as u8;
+                }
+                OpCode::JumpIfFalse(ref mut index) => {
+                    *index = len as u8;
+                }
+                _ => unreachable!(),
+            }
+        }
+        let arg = &mut self.state_mut().prototype.code[index + 1];
+        match arg {
+            OpCode::ExtraArg(ref mut arg) => {
+                *arg = (len >> 8) as u8;
+            }
             _ => unreachable!(),
         }
     }

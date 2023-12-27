@@ -52,6 +52,8 @@ pub enum OpCode {
     CloseUpvalue(u8),
     Pop,
     Return,
+
+    ExtraArg(u8),
 }
 
 impl Display for OpCode {
@@ -94,6 +96,7 @@ impl Display for OpCode {
             OpCode::CloseUpvalue(index) => write!(f, "CloseUpvalue {index}"),
             OpCode::Pop => write!(f, "Pop"),
             OpCode::Return => write!(f, "Return"),
+            OpCode::ExtraArg(arg) => write!(f, "ExtraArg {arg}"),
         }
     }
 }

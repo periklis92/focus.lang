@@ -120,6 +120,17 @@ impl Vm {
         self.frames.last_mut().unwrap()
     }
 
+    fn extra_arg(&mut self) -> u8 {
+        let frame = self.frame_mut();
+        let code_len = &frame.closure.function.prototype().unwrap().code;
+        let code = &code_len[frame.ip];
+        frame.ip += 1;
+        match code {
+            OpCode::ExtraArg(arg) => *arg,
+            _ => unreachable!(),
+        }
+    }
+
     fn run(&mut self) -> Result<(), RuntimeError> {
         loop {
             self.frame_mut().ip += 1;
@@ -541,12 +552,16 @@ impl Vm {
                 }
                 OpCode::JumpIfFalse(location) => {
                     let value = self.pop();
+                    let arg = self.extra_arg();
                     if value.is_false() {
-                        self.frames.last_mut().unwrap().ip += location as usize;
+                        self.frames.last_mut().unwrap().ip +=
+                            ((arg as u16) << 8 | location as u16) as usize;
                     }
                 }
                 OpCode::Jump(location) => {
-                    self.frames.last_mut().unwrap().ip += location as usize;
+                    let arg = self.extra_arg();
+                    self.frames.last_mut().unwrap().ip +=
+                        ((arg as u16) << 8 | location as u16) as usize;
                 }
                 OpCode::CloseUpvalue(index) => {
                     let offset = self.frame().slot_offset;
@@ -572,6 +587,7 @@ impl Vm {
                         return Ok(());
                     }
                 }
+                OpCode::ExtraArg(_) => unreachable!(),
             }
         }
 
