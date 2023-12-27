@@ -18,14 +18,14 @@
 		return aceEditor.getValue();
 	}
 
-	onMount(async () => {
+	onMount(() => {
 		aceEditor = ace.edit(editor);
 		aceEditor.getSession().setMode('ace/mode/focus');
 		aceEditor.setTheme('ace/theme/monokai');
 		load();
 	});
 
-	export async function reset() {
+	export function reset() {
 		setSource(defaultCode);
 		localStorage.removeItem('code');
 	}
