@@ -39,13 +39,14 @@ fn main() -> Result<(), RunCliError> {
 
     let mut vm = Vm::new_with_std();
     let result = vm.load_from_source("main", &source)?;
-    vm.execute_module(result, "main")?;
 
     vm.module_loader()
         .module_at(result)
         .unwrap()
         .dump(&mut out)
         .map_err(RunCliError::ReadWriteError)?;
+
+    vm.execute_module(result, "main")?;
 
     let last_value = vm.stack().last().unwrap();
     println!("{last_value}");
