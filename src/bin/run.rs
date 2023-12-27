@@ -2,6 +2,7 @@ use std::{fs::File, path::Path};
 
 use focus_lang::{
     compiler::CompilerError,
+    value::Value,
     vm::{RuntimeError, Vm},
 };
 
@@ -26,7 +27,7 @@ impl From<RuntimeError> for RunCliError {
     }
 }
 
-fn main() -> Result<(), RunCliError> {
+fn main() -> Result<Value, RunCliError> {
     let Some(input_filename) = std::env::args().nth(1) else {
         eprintln!("Please provide a filename as the first argument.");
         return Err(RunCliError::MissingInput);
@@ -49,7 +50,6 @@ fn main() -> Result<(), RunCliError> {
     vm.execute_module(result, "main")?;
 
     let last_value = vm.stack().last().unwrap();
-    println!("{last_value}");
 
-    Ok(())
+    Ok(last_value.clone())
 }

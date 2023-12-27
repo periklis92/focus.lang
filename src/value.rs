@@ -3,6 +3,7 @@ use std::{
     collections::HashMap,
     fmt::{Debug, Display},
     hash::Hash,
+    process::Termination,
     rc::Rc,
 };
 
@@ -166,6 +167,12 @@ impl Value {
             Value::Closure(closure) => Some(closure),
             _ => None,
         }
+    }
+}
+
+impl Termination for Value {
+    fn report(self) -> std::process::ExitCode {
+        std::process::ExitCode::SUCCESS
     }
 }
 

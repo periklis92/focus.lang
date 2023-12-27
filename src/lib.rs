@@ -6,5 +6,5 @@ pub mod parser;
 pub mod state;
 pub mod stdlib;
 mod token;
-mod value;
+pub mod value;
 pub mod vm;
