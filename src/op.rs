@@ -33,6 +33,7 @@ pub enum OpCode {
     IDivide,
     Multiply,
     Modulus,
+    Concat,
     Negate,
     Not,
 
@@ -80,6 +81,7 @@ impl Display for OpCode {
             OpCode::IDivide => write!(f, "IDivide"),
             OpCode::Multiply => write!(f, "Multiply"),
             OpCode::Modulus => write!(f, "Modulus"),
+            OpCode::Concat => write!(f, "Concat"),
             OpCode::Negate => write!(f, "Negate"),
             OpCode::Not => write!(f, "Not"),
             OpCode::CmpEq => write!(f, "CmpEq"),

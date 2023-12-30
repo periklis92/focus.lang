@@ -84,6 +84,7 @@ pub enum Operation {
     Arithmetic(ArithmeticOperator),
     Comparison(ComparisonOperator),
     Boolean(BooleanOperator),
+    Concat,
 }
 
 impl Operation {
@@ -99,6 +100,7 @@ impl Operation {
                 | ArithmeticOperator::IDivide
                 | ArithmeticOperator::Modulus,
             ) => 40,
+            Operation::Concat => 50,
         }
     }
 }

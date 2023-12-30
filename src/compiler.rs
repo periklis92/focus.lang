@@ -388,6 +388,12 @@ impl<'a> Compiler<'a> {
                     }
                     Ok(())
                 }
+                Operation::Concat => {
+                    self.expression(*lhs)?;
+                    self.expression(*rhs)?;
+                    self.emit_code(OpCode::Concat);
+                    Ok(())
+                }
             },
             Expression::Array(array) => {
                 let len = array.len();

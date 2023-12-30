@@ -445,6 +445,27 @@ impl Vm {
                         _ => todo!(),
                     }
                 }
+                OpCode::Concat => {
+                    let rhs = self.pop();
+                    let lhs = self.pop();
+                    match (lhs, rhs) {
+                        (Value::Array(l), Value::Array(r)) => {
+                            l.borrow_mut().extend_from_slice(r.borrow().as_slice());
+                            self.push(Value::Array(l));
+                        }
+                        (Value::String(l), Value::String(r)) => {
+                            let mut s = l.as_str().to_string();
+                            s.push_str(r.as_str());
+                            self.push(Value::String(Rc::new(s)));
+                        }
+                        (lhs, rhs) => {
+                            return Err(RuntimeError::InvalidOperandType {
+                                lhs: lhs.type_name().to_string(),
+                                rhs: rhs.type_name().to_string(),
+                            })
+                        }
+                    }
+                }
                 OpCode::Negate => {
                     let value = self.pop();
                     let result = match value {
@@ -703,6 +724,8 @@ pub enum RuntimeError {
     CannotCallNonCallableValue,
     CannotLoadNativeModuleAtRuntime,
     UnexpectedType,
+    InvalidOperandType { lhs: String, rhs: String },
+    InvalidConversion,
 }
 
 impl Error for RuntimeError {}
@@ -723,6 +746,12 @@ impl Display for RuntimeError {
             }
             RuntimeError::UnexpectedType => {
                 write!(f, "Unexpected type")
+            }
+            RuntimeError::InvalidOperandType { lhs, rhs } => {
+                write!(f, "Invalid type of operands. lhs: {lhs}, rhs: {rhs}")
+            }
+            RuntimeError::InvalidConversion => {
+                write!(f, "Invalid conversion.")
             }
         }
     }

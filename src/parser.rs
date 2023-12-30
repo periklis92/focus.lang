@@ -536,6 +536,7 @@ impl<'a> Parser<'a> {
             TokenType::Less => Some(Operation::Comparison(ComparisonOperator::Less)),
             TokenType::LessEqual => Some(Operation::Comparison(ComparisonOperator::LessEqual)),
             TokenType::Assign => Some(Operation::Assignment),
+            TokenType::Dots => Some(Operation::Concat),
             _ => None,
         }
     }
