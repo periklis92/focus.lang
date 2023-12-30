@@ -154,10 +154,10 @@ impl NativeModuleBuilder {
         }
     }
 
-    pub fn with_function<T: Fn(&mut Vm) -> Result<Value, RuntimeError> + 'static>(
+    pub fn with_function(
         mut self,
         ident: &str,
-        function: T,
+        function: fn(&mut Vm) -> Result<Value, RuntimeError>,
     ) -> Self {
         self.locals.push(ident.to_string());
         self.values
