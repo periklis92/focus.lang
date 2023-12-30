@@ -222,15 +222,9 @@ impl<'a> Parser<'a> {
                     dec = true;
                     self.call_depth -= 1;
                 }
-                let expr = if self.is_call()? {
-                    self.lexer.next();
-                    let expr = self.call()?;
-                    expr
-                } else {
-                    self.lexer.next();
-                    self.lexer.skip_comments_and_new_lines();
-                    self.expression()?
-                };
+                self.lexer.next();
+                self.lexer.skip_comments_and_new_lines();
+                let expr = self.expression()?;
                 if dec {
                     self.call_depth += 1;
                 }
@@ -393,19 +387,6 @@ impl<'a> Parser<'a> {
                     .lexer
                     .next_indented()
                     .is_some_and(|t| t.token_type.is_primary() && t.token_type != TokenType::Minus))
-            }
-            TokenType::LParen => {
-                if cloned.call_depth > 0 {
-                    cloned.call_depth -= 1;
-                }
-                cloned.lexer.next();
-                cloned.expression()?;
-                cloned.lexer.skip_comments_and_new_lines();
-                cloned.expect(TokenType::RParen)?;
-                Ok(cloned
-                    .lexer
-                    .next_indented()
-                    .is_some_and(|t| t.token_type.is_primary()))
             }
             _ => Ok(false),
         }
