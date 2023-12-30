@@ -12,9 +12,9 @@
 
 	afterUpdate(window.Prism?.highlightAll);
 
-	let sidebarWidth = '580px';
-	let sidebarWidthLabel = 'Shrink';
-	let sidebarWidthIcon = 'bi-arrows-angle-contract';
+	let sidebarWidth = '380px';
+	let sidebarWidthLabel = 'Expand';
+	let sidebarWidthIcon = 'bi-arrows-angle-expand';
 </script>
 
 <div class="position-relative bg-dark">

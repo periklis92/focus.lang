@@ -77,6 +77,12 @@
 						id: 'tutorial-03',
 						markdown: 'tutorials/03-functions.md',
 						code: 'tutorials/03-functions.fl'
+					},
+					{
+						title: '04. Blocks',
+						id: 'tutorial-04',
+						markdown: 'tutorials/04-blocks.md',
+						code: 'tutorials/04-blocks.fl'
 					}
 				]
 			},
