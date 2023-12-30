@@ -315,6 +315,7 @@ impl<'a> Parser<'a> {
             let value = if self.lexer.next_checked(TokenType::Assign).is_none() {
                 None
             } else {
+                self.lexer.skip_comments_and_new_lines();
                 Some(self.expression()?)
             };
             Ok(Statement::Let { ident, value })
