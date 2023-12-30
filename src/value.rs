@@ -168,6 +168,21 @@ impl Value {
             _ => None,
         }
     }
+
+    pub fn type_name(&self) -> &str {
+        match self {
+            Value::Unit => "unit",
+            Value::Bool(_) => "bool",
+            Value::Integer(_) => "int",
+            Value::Number(_) => "number",
+            Value::String(_) => "string",
+            Value::Table(_) => "table",
+            Value::Closure(_) => "function",
+            Value::Array(_) => "array",
+            Value::Module(_) => "module",
+            Value::UserData(_) => "user_data",
+        }
+    }
 }
 
 impl Termination for Value {
