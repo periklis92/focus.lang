@@ -726,6 +726,7 @@ pub enum RuntimeError {
     UnexpectedType,
     InvalidOperandType { lhs: String, rhs: String },
     InvalidConversion,
+    Custom(String),
 }
 
 impl Error for RuntimeError {}
@@ -752,6 +753,9 @@ impl Display for RuntimeError {
             }
             RuntimeError::InvalidConversion => {
                 write!(f, "Invalid conversion.")
+            }
+            RuntimeError::Custom(message) => {
+                write!(f, "Error: {message}")
             }
         }
     }
