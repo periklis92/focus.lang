@@ -7,6 +7,8 @@ use std::{
     rc::Rc,
 };
 
+use serde::{Deserialize, Serialize};
+
 use crate::{
     state::{Module, Prototype},
     vm::{RuntimeError, Vm},
@@ -105,7 +107,8 @@ impl Closure {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
 pub enum Value {
     Unit,
     Bool(bool),
@@ -113,10 +116,17 @@ pub enum Value {
     Number(f64),
     String(StringRef),
     Table(TableRef),
+    #[serde(skip_serializing)]
+    #[serde(skip_deserializing)]
     Closure(ClosureRef),
     Array(ArrayRef),
+    #[serde(skip_serializing)]
+    #[serde(skip_deserializing)]
     Module(ModuleRef),
+    #[serde(skip_serializing)]
+    #[serde(skip_deserializing)]
     UserData(UserDataRef),
+    Char(char),
 }
 
 impl Value {
@@ -173,6 +183,7 @@ impl Value {
         match self {
             Value::Unit => "unit",
             Value::Bool(_) => "bool",
+            Value::Char(_) => "char",
             Value::Integer(_) => "int",
             Value::Number(_) => "number",
             Value::String(_) => "string",
@@ -228,6 +239,7 @@ impl Hash for Value {
         match self {
             Value::Unit => {}
             Value::Bool(bool) => bool.hash(state),
+            Value::Char(char) => char.hash(state),
             Value::Integer(int) => int.hash(state),
             Value::Number(num) => num.to_bits().hash(state),
             Value::String(str) => str.hash(state),
@@ -245,6 +257,7 @@ impl Display for Value {
         match self {
             Value::Unit => write!(f, "()"),
             Value::Bool(bool) => write!(f, "{bool}"),
+            Value::Char(char) => write!(f, "{char}"),
             Value::Integer(int) => write!(f, "{int}"),
             Value::Number(num) => write!(f, "{num}"),
             Value::String(str) => write!(f, "{str}"),
@@ -279,3 +292,27 @@ impl Display for Value {
         }
     }
 }
+
+// impl Serialize for Value {
+//     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+//     where
+//         S: serde::Serializer,
+//     {
+//         match self {
+//             Value::Unit => serializer.serialize_unit(),
+//             Value::Bool(bool) => serializer.serialize_bool(*bool),
+//             Value::Integer(integer) => serializer.serialize_i64(*integer),
+//             Value::Number(number) => serializer.serialize_f64(*number),
+//             Value::String(str) => serializer.serialize_str(str),
+//             Value::Table(table) => {
+//                 let mut map = serializer.serialize_map(Some(table.borrow().len()))?;
+//                 for (k, v) in table.borrow().iter() {
+//                     map.serialize_entry(k, v)?;
+//                 }
+//                 map.end()
+//             }
+//             Value::Array(array) => serializer.collect_seq(array.borrow().iter()),
+//             v => panic!("Cannot serialize value of type {}", v.type_name()),
+//         }
+//     }
+// }
