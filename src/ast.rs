@@ -135,6 +135,7 @@ pub enum BooleanOperator {
 pub enum Literal {
     Unit,
     Bool(bool),
+    Char(char),
     Integer(i64),
     Number(f64),
     String(String),

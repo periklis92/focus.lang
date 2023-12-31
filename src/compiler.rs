@@ -538,6 +538,7 @@ impl<'a> Compiler<'a> {
         match literal {
             Literal::Unit => self.constant(Value::Unit),
             Literal::Bool(b) => self.constant(Value::Bool(b)),
+            Literal::Char(c) => self.constant(Value::Char(c)),
             Literal::Integer(i) => self.constant(Value::Integer(i)),
             Literal::Number(n) => self.constant(Value::Number(n)),
             Literal::String(s) => self.constant(Value::String(Rc::new(s))),

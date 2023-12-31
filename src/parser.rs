@@ -178,6 +178,15 @@ impl<'a> Parser<'a> {
                 self.lexer.next();
                 Ok(Expression::Literal(Literal::Unit))
             }
+            TokenType::SingleQuote => {
+                self.lexer.next();
+                let token = self.lexer.next_empty();
+                let str = self.lexer.slice(token.span);
+                let char = str
+                    .parse::<char>()
+                    .map_err(|e| ParserError::UnableToParseChar(e))?;
+                Ok(Expression::Literal(Literal::Char(char)))
+            }
             TokenType::Minus => {
                 self.lexer.next();
                 Ok(Expression::UnaryOperation {
@@ -626,6 +635,7 @@ pub enum ParserError {
     FoundExpressionWhenStatementWasExpected,
     TopLevelExpressionNotAllowed,
     NotImplemented,
+    UnableToParseChar(std::char::ParseCharError),
 }
 
 impl Error for ParserError {}
@@ -666,6 +676,7 @@ impl Display for ParserError {
                 write!(f, "Top level expresion not allowed")
             }
             ParserError::NotImplemented => write!(f, "Not implemented"),
+            ParserError::UnableToParseChar(err) => write!(f, "Unable to parse number: `{err}`"),
         }
     }
 }
