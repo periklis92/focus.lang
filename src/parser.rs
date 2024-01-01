@@ -332,6 +332,11 @@ impl<'a> Parser<'a> {
     }
 
     fn block(&mut self) -> Result<Expression, ParserError> {
+        let mut dec = false;
+        if self.call_depth > 0 {
+            dec = true;
+            self.call_depth -= 1;
+        }
         self.depth += 1;
         let statements = if self.lexer.peek() == TokenType::NewLine {
             let start_indentation = self.lexer.indentation();
@@ -360,6 +365,9 @@ impl<'a> Parser<'a> {
         if statements.last().is_some_and(|s| !s.is_expression()) {
             self.depth -= 1;
             return Err(ParserError::FoundStatementWhereExpressionWasExpected);
+        }
+        if dec {
+            self.call_depth += 1;
         }
         self.depth -= 1;
         Ok(Expression::Block(statements))
