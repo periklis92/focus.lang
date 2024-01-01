@@ -1,4 +1,4 @@
-use std::{io::Write, path::Path, rc::Rc};
+use std::{cell::RefCell, fmt::Display, io::Write, path::Path, rc::Rc};
 
 use crate::{
     compiler::{Compiler, CompilerError},
@@ -164,7 +164,7 @@ impl NativeModuleBuilder {
             .push(Value::Closure(Rc::new(Closure::from_native(Rc::new(
                 NativeFunction {
                     ident: ident.to_string(),
-                    function: Rc::new(function),
+                    function: Rc::new(RefCell::new(function)),
                 },
             )))));
         self
@@ -309,5 +309,28 @@ impl Prototype {
 impl PartialEq for Prototype {
     fn eq(&self, other: &Self) -> bool {
         std::ptr::eq(self as *const Prototype, other as *const Prototype)
+    }
+}
+
+pub enum StackTraceInfo {
+    NativeFunction { ident: String },
+    Prototype { ident: String, line: usize },
+}
+
+pub struct StackTrace {
+    pub info: Vec<StackTraceInfo>,
+}
+
+impl Display for StackTrace {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for info in &self.info {
+            match info {
+                StackTraceInfo::NativeFunction { ident } => writeln!(f, "external code: {ident}")?,
+                StackTraceInfo::Prototype { ident, line } => {
+                    writeln!(f, "function {ident} at line {line}")?
+                }
+            }
+        }
+        Ok(())
     }
 }

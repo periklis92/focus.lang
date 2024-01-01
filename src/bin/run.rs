@@ -47,7 +47,14 @@ fn main() -> Result<Value, RunCliError> {
         .dump(&mut out)
         .map_err(RunCliError::ReadWriteError)?;
 
-    vm.execute_module(result, "main")?;
+    match vm.execute_module(result, "main") {
+        Ok(_) => {}
+        Err(err) => {
+            println!("There was an error: {err}");
+            println!("{}", vm.stack_trace(5));
+            return Err(err.into());
+        }
+    }
 
     let last_value = vm.stack().last().unwrap();
 

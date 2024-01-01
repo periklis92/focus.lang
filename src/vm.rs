@@ -4,7 +4,7 @@ use std::{cell::RefCell, error::Error, fmt::Display, rc::Rc, usize};
 use crate::{
     compiler::CompilerError,
     op::OpCode,
-    state::{Module, ModuleLoader, ModuleValue},
+    state::{Module, ModuleLoader, ModuleValue, StackTrace, StackTraceInfo},
     stdlib,
     value::{Closure, ClosureRef, Function, Table, Upvalue, UpvalueRef, Value},
 };
@@ -82,7 +82,7 @@ impl Vm {
         let closure = self.stack[index].clone().as_closure().unwrap();
         self.push(Value::Closure(closure.clone()));
         self.push(Value::Unit);
-        self.call(closure, 1)?;
+        self.execute_prototype(closure, 1)?;
         self.run()
     }
 }
@@ -100,7 +100,7 @@ impl Vm {
                 let main = prototype.clone();
                 let closure = Rc::new(Closure::from_prototype(main));
                 self.push(Value::Closure(closure.clone()));
-                self.call(closure, 0)?;
+                self.execute_prototype(closure, 0)?;
                 self.run()?;
             }
         }
@@ -223,7 +223,7 @@ impl Vm {
                                         let closure =
                                             Rc::new(Closure::from_prototype(prototype.clone()));
                                         self.push(Value::Closure(closure.clone()));
-                                        self.call(closure.clone(), 0)?;
+                                        self.execute_prototype(closure.clone(), 0)?;
                                         let slot_offset = self.frame().slot_offset;
                                         let value =
                                             self.stack[slot_offset + integer as usize].clone();
@@ -347,7 +347,12 @@ impl Vm {
                         (Value::Number(l), Value::Integer(r)) => {
                             self.push(Value::Number(l + r as f64));
                         }
-                        (lhs, rhs) => panic!("invalid values: {lhs:?}, {rhs:?}"),
+                        (lhs, rhs) => {
+                            return Err(RuntimeError::InvalidOperandType {
+                                lhs: lhs.type_name().to_string(),
+                                rhs: rhs.type_name().to_string(),
+                            })
+                        }
                     }
                 }
                 OpCode::Subtract => {
@@ -492,10 +497,7 @@ impl Vm {
                         .unwrap()
                         .clone();
                     match value {
-                        Value::Closure(closure) => match &closure.function {
-                            Function::Prototype(_) => self.call(closure, num_args as usize)?,
-                            Function::Native(_) => self.call_native(closure, num_args as usize)?,
-                        },
+                        Value::Closure(closure) => self.call(closure, num_args as usize)?,
                         _ => return Err(RuntimeError::CannotCallNonCallableValue),
                     }
                 }
@@ -660,6 +662,17 @@ impl Vm {
     }
 
     pub fn call(&mut self, closure: ClosureRef, num_args: usize) -> Result<(), RuntimeError> {
+        match closure.function {
+            Function::Prototype(_) => self.execute_prototype(closure, num_args),
+            Function::Native(_) => self.execute_native(closure, num_args),
+        }
+    }
+
+    fn execute_prototype(
+        &mut self,
+        closure: ClosureRef,
+        num_args: usize,
+    ) -> Result<(), RuntimeError> {
         if closure.function.prototype().unwrap().num_args != num_args {
             return Err(RuntimeError::IncorrectNumberOfArguments);
         }
@@ -677,7 +690,7 @@ impl Vm {
         self.run()
     }
 
-    fn call_native(&mut self, closure: ClosureRef, num_args: usize) -> Result<(), RuntimeError> {
+    fn execute_native(&mut self, closure: ClosureRef, num_args: usize) -> Result<(), RuntimeError> {
         if self.frames.len() == usize::MAX {
             return Err(RuntimeError::StackOverflow);
         }
@@ -688,7 +701,7 @@ impl Vm {
             slot_offset: (self.stack.len() - num_args - 1),
         };
         self.frames.push(frame);
-        let result = (closure.function.native().unwrap().function)(self)?;
+        let result = (closure.function.native().unwrap().function.borrow_mut())(self)?;
         let frame = self.frames.pop().unwrap();
         if self.frames.is_empty() {
             return Ok(());
@@ -699,6 +712,24 @@ impl Vm {
         self.push(result);
 
         Ok(())
+    }
+
+    pub fn stack_trace(&self, depth: usize) -> StackTrace {
+        let mut info = Vec::new();
+        for i in 0..depth.min(self.frames.len() - 1) {
+            let frame = &self.frames[self.frames.len() - 1 - i];
+            let st_info = match &frame.closure.function {
+                Function::Prototype(prototype) => StackTraceInfo::Prototype {
+                    ident: prototype.ident.clone(),
+                    line: prototype.line(frame.ip),
+                },
+                Function::Native(native) => StackTraceInfo::NativeFunction {
+                    ident: native.ident.clone(),
+                },
+            };
+            info.push(st_info);
+        }
+        StackTrace { info }
     }
 
     pub fn top(&mut self) -> usize {

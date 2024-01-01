@@ -34,7 +34,7 @@ pub enum Upvalue {
 
 pub struct NativeFunction {
     pub ident: String,
-    pub function: Rc<dyn Fn(&mut Vm) -> Result<Value, RuntimeError>>,
+    pub function: Rc<RefCell<dyn FnMut(&mut Vm) -> Result<Value, RuntimeError>>>,
 }
 
 impl PartialEq for NativeFunction {
@@ -127,6 +127,9 @@ pub enum Value {
     #[serde(skip_deserializing)]
     UserData(UserDataRef),
     Char(char),
+    #[serde(skip_serializing)]
+    #[serde(skip_deserializing)]
+    Iterator(ClosureRef),
 }
 
 impl Value {
@@ -179,6 +182,13 @@ impl Value {
         }
     }
 
+    pub fn as_iterator(self) -> Option<ClosureRef> {
+        match self {
+            Value::Iterator(iterator) => Some(iterator),
+            _ => None,
+        }
+    }
+
     pub fn type_name(&self) -> &str {
         match self {
             Value::Unit => "unit",
@@ -192,6 +202,7 @@ impl Value {
             Value::Array(_) => "array",
             Value::Module(_) => "module",
             Value::UserData(_) => "user_data",
+            Value::Iterator(_) => "iterator",
         }
     }
 }
@@ -206,6 +217,7 @@ impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Bool(l0), Self::Bool(r0)) => l0 == r0,
+            (Self::Char(l0), Self::Char(r0)) => l0 == r0,
             (Self::Integer(l0), Self::Integer(r0)) => l0 == r0,
             (Self::Number(l0), Self::Number(r0)) => l0 == r0,
             (Self::String(l0), Self::String(r0)) => l0 == r0,
@@ -248,6 +260,7 @@ impl Hash for Value {
             Value::Array(array) => Rc::as_ptr(array).hash(state),
             Value::Module(module) => Rc::as_ptr(module).hash(state),
             Value::UserData(user_data) => Rc::as_ptr(user_data).hash(state),
+            Value::Iterator(iterator) => Rc::as_ptr(iterator).hash(state),
         }
     }
 }
@@ -289,30 +302,9 @@ impl Display for Value {
             Value::UserData(user_data) => {
                 write!(f, "user_data: {:x?}", Rc::as_ptr(user_data))
             }
+            Value::Iterator(iterator) => {
+                write!(f, "iterator: {:x?}", Rc::as_ptr(iterator))
+            }
         }
     }
 }
-
-// impl Serialize for Value {
-//     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-//     where
-//         S: serde::Serializer,
-//     {
-//         match self {
-//             Value::Unit => serializer.serialize_unit(),
-//             Value::Bool(bool) => serializer.serialize_bool(*bool),
-//             Value::Integer(integer) => serializer.serialize_i64(*integer),
-//             Value::Number(number) => serializer.serialize_f64(*number),
-//             Value::String(str) => serializer.serialize_str(str),
-//             Value::Table(table) => {
-//                 let mut map = serializer.serialize_map(Some(table.borrow().len()))?;
-//                 for (k, v) in table.borrow().iter() {
-//                     map.serialize_entry(k, v)?;
-//                 }
-//                 map.end()
-//             }
-//             Value::Array(array) => serializer.collect_seq(array.borrow().iter()),
-//             v => panic!("Cannot serialize value of type {}", v.type_name()),
-//         }
-//     }
-// }
