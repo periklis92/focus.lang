@@ -3,6 +3,7 @@
 	import { afterUpdate, createEventDispatcher, type EventDispatcher } from 'svelte';
 
 	export let menu: Menu[];
+	let selectedMenuIndex: number, selectedMenuItemIndex: number;
 	export let content: string | undefined = undefined;
 	export const dispatcher = createEventDispatcher<{ selected: MenuItem }>();
 
@@ -66,14 +67,17 @@
 							</a>
 							<div class="collapse" id={`_menu-item-${i}`}>
 								<ul class="btn-toggle-nav list-unstyled fw-normal pb-1 small">
-									{#each item.items as child}
+									{#each item.items as child, j}
 										<li>
 											<a
 												id={child.id}
 												href="/"
 												class=" text-white"
-												on:click|preventDefault={() => dispatcher('selected', child)}
-												>{child.title}</a
+												on:click|preventDefault={() => {
+													dispatcher('selected', child);
+													selectedMenuIndex = i;
+													selectedMenuItemIndex = j;
+												}}>{child.title}</a
 											>
 										</li>
 									{/each}
@@ -92,6 +96,16 @@
 					>
 						<i class="bi bi-arrow-left" />
 						Back
+					</button>
+					<button
+						type="button"
+						class="btn btn-primary btn-sm sticky-top mx-auto"
+						style="margin-right: 0 !important; float:right"
+						aria-current="page"
+						on:click={() => (content = undefined)}
+					>
+						Next
+						<i class="bi bi-arrow-right" />
 					</button>
 					<div class="content">
 						{@html content}
