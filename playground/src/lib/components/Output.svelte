@@ -56,5 +56,6 @@
 		color: white;
 		height: 100%;
 		overflow: auto;
+		white-space: pre;
 	}
 </style>

@@ -17,15 +17,15 @@
 		if (e.ctrlKey && e.key === 's') {
 			e.preventDefault();
 			e.stopPropagation();
-			codeEditor.save();
+			codeEditor?.save();
 		}
 	});
 
 	function run() {
 		let source = codeEditor.getSource();
 		if (source.length > 0) {
+			const vm = Vm.new_with_std();
 			try {
-				const vm = Vm.new_with_std();
 				vm.add_event_listener('log', (data: CustomEvent<string>) => {
 					output.log(data.detail);
 				});
@@ -33,7 +33,9 @@
 				vm.execute_module(index, 'main');
 			} catch (error) {
 				console.error(error);
-				output.logError(error as string);
+				output.logError(`${error as string}\n${vm.stack_trace(5).to_string()}`);
+				let stackTrace = vm.stack_trace(10);
+				console.error(stackTrace.to_string());
 			}
 		}
 	}

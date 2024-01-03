@@ -1,6 +1,8 @@
 pub mod ast;
 pub mod compiler;
+mod gc;
 mod lexer;
+mod object;
 mod op;
 pub mod parser;
 pub mod state;

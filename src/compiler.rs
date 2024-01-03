@@ -179,6 +179,7 @@ pub struct Compiler<'a> {
     pub module_locals: Vec<String>,
     pub module_provider: &'a mut ModuleLoader,
     pub module_aliases: Vec<ModuleAlias>,
+    line_no: usize,
 }
 
 impl<'a> Compiler<'a> {
@@ -189,6 +190,7 @@ impl<'a> Compiler<'a> {
             module_locals: Vec::new(),
             module_provider,
             module_aliases: Vec::new(),
+            line_no: 1,
         }
     }
 
@@ -259,7 +261,12 @@ impl<'a> Compiler<'a> {
 
     pub fn module_statement(&mut self, statement: Statement) -> Result<(), CompilerError> {
         match statement {
-            Statement::Let { ident, value } => {
+            Statement::Let {
+                line_no,
+                ident,
+                value,
+            } => {
+                self.line_no = line_no;
                 if let Some(expression) = value {
                     self.expression(expression)?;
                 } else {
@@ -268,12 +275,23 @@ impl<'a> Compiler<'a> {
                 self.module_locals.push(ident);
                 Ok(())
             }
-            Statement::Function { ident, args, expr } => {
+            Statement::Function {
+                line_no,
+                ident,
+                args,
+                expr,
+            } => {
+                self.line_no = line_no;
                 self.function(ident.clone(), args, expr, false)?;
                 self.module_locals.push(ident);
                 Ok(())
             }
-            Statement::Import { source, imports } => {
+            Statement::Import {
+                line_no,
+                source,
+                imports,
+            } => {
+                self.line_no = line_no;
                 let module_index = match source {
                     ImportSource::Module(_) => todo!(),
                     ImportSource::File(filename) => self.module_provider.load_module(filename),
@@ -301,7 +319,12 @@ impl<'a> Compiler<'a> {
 
     pub fn statement(&mut self, statement: Statement) -> Result<(), CompilerError> {
         match statement {
-            Statement::Let { ident, value } => {
+            Statement::Let {
+                line_no,
+                ident,
+                value,
+            } => {
+                self.line_no = line_no;
                 if let Some(expression) = value {
                     self.expression(expression)?;
                 } else {
@@ -310,12 +333,23 @@ impl<'a> Compiler<'a> {
                 self.add_local(ident)?;
                 Ok(())
             }
-            Statement::Function { ident, args, expr } => {
+            Statement::Function {
+                line_no,
+                ident,
+                args,
+                expr,
+            } => {
+                self.line_no = line_no;
                 self.function(ident.clone(), args, expr, false)?;
                 self.add_local(ident)?;
                 Ok(())
             }
-            Statement::Import { source, imports } => {
+            Statement::Import {
+                line_no,
+                source,
+                imports,
+            } => {
+                self.line_no = line_no;
                 let module_index = match source {
                     ImportSource::Module(_) => todo!(),
                     ImportSource::File(filename) => self.module_provider.load_module(filename),
@@ -337,7 +371,11 @@ impl<'a> Compiler<'a> {
                 }
                 Ok(())
             }
-            Statement::Expression(expression) => {
+            Statement::Expression {
+                expression,
+                line_no,
+            } => {
+                self.line_no = line_no;
                 self.expression(expression)?;
                 Ok(())
             }
@@ -424,13 +462,22 @@ impl<'a> Compiler<'a> {
                 let block_len = block.len() - 1;
                 for (i, statement) in block.into_iter().enumerate() {
                     let is_expression = statement.is_expression();
-                    let pop = !matches!(statement, Statement::Expression(Expression::Call { .. }));
+                    let pop = !matches!(
+                        statement,
+                        Statement::Expression {
+                            expression: Expression::Call { .. },
+                            ..
+                        }
+                    );
                     let is_assignment = matches!(
                         statement,
-                        Statement::Expression(Expression::Operation {
-                            operation: Operation::Assignment,
+                        Statement::Expression {
+                            expression: Expression::Operation {
+                                operation: Operation::Assignment,
+                                ..
+                            },
                             ..
-                        })
+                        }
                     );
                     self.statement(statement)?;
                     if i < block_len && is_expression && pop && !is_assignment {
@@ -802,7 +849,7 @@ impl<'a> Compiler<'a> {
     }
 
     fn emit_code(&mut self, op_code: OpCode) {
-        let line = self.parser.last_expr_line();
+        let line = self.line_no;
         self.state_mut().prototype.push_op_code(op_code, line);
     }
 

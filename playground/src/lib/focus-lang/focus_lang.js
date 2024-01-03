@@ -258,6 +258,49 @@ export class ModuleLoader {
 }
 /**
 */
+export class StackTrace {
+
+    static __wrap(ptr) {
+        ptr = ptr >>> 0;
+        const obj = Object.create(StackTrace.prototype);
+        obj.__wbg_ptr = ptr;
+
+        return obj;
+    }
+
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+
+        return ptr;
+    }
+
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_stacktrace_free(ptr);
+    }
+    /**
+    * @returns {string}
+    */
+    to_string() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.stacktrace_to_string(retptr, this.__wbg_ptr);
+            var r0 = getInt32Memory0()[retptr / 4 + 0];
+            var r1 = getInt32Memory0()[retptr / 4 + 1];
+            deferred1_0 = r0;
+            deferred1_1 = r1;
+            return getStringFromWasm0(r0, r1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+}
+/**
+*/
 export class Vm {
 
     static __wrap(ptr) {
@@ -351,6 +394,14 @@ export class Vm {
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
         }
+    }
+    /**
+    * @param {number} depth
+    * @returns {StackTrace}
+    */
+    stack_trace(depth) {
+        const ret = wasm.vm_stack_trace(this.__wbg_ptr, depth);
+        return StackTrace.__wrap(ret);
     }
 }
 

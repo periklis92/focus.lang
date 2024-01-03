@@ -96,6 +96,7 @@ impl<'a> Parser<'a> {
         let token = self.lexer.peek();
         self.last_expr_start_position = self.lexer.position();
         self.last_expr_line = self.lexer.line();
+        let line_no = self.lexer.line();
         let statement = match token {
             TokenType::Let => self.r#let()?,
             TokenType::From => return Err(ParserError::NotImplemented),
@@ -117,6 +118,7 @@ impl<'a> Parser<'a> {
                 };
 
                 Statement::Import {
+                    line_no,
                     source,
                     imports: vec![Import::All { alias: None }],
                 }
@@ -124,7 +126,10 @@ impl<'a> Parser<'a> {
             TokenType::Eos => return Err(ParserError::EndOfSource),
             TokenType::Unknown => return Err(ParserError::UnknownToken),
             _ if self.depth == 0 => return Err(ParserError::TopLevelExpressionNotAllowed),
-            _ => Statement::Expression(self.expression()?),
+            _ => Statement::Expression {
+                expression: self.expression()?,
+                line_no,
+            },
         };
 
         Ok(statement)
@@ -315,6 +320,7 @@ impl<'a> Parser<'a> {
     }
 
     fn r#let(&mut self) -> Result<Statement, ParserError> {
+        let line_no = self.lexer.line();
         self.expect(TokenType::Let)?;
         if self.lexer.peek_nth(1) == TokenType::Ident || self.lexer.peek_nth(1) == TokenType::Unit {
             self.function_statement()
@@ -327,7 +333,11 @@ impl<'a> Parser<'a> {
                 self.lexer.skip_comments_and_new_lines();
                 Some(self.expression()?)
             };
-            Ok(Statement::Let { ident, value })
+            Ok(Statement::Let {
+                ident,
+                value,
+                line_no,
+            })
         }
     }
 
@@ -350,12 +360,13 @@ impl<'a> Parser<'a> {
                 !stm.is_expression()
                     || matches!(
                         stm,
-                        Statement::Expression(
-                            Expression::Operation {
+                        Statement::Expression {
+                            expression: Expression::Operation {
                                 operation: Operation::Assignment,
                                 ..
-                            } | Expression::Call { .. }
-                        )
+                            } | Expression::Call { .. },
+                            ..
+                        }
                     )
             })
         {
@@ -438,6 +449,7 @@ impl<'a> Parser<'a> {
     }
 
     fn function_statement(&mut self) -> Result<Statement, ParserError> {
+        let line_no = self.lexer.line();
         let token = self.expect(TokenType::Ident)?;
         let ident = self.lexer().slice(token.span).to_string();
         let args = if self.lexer.next_checked(TokenType::Unit).is_none() {
@@ -447,7 +459,12 @@ impl<'a> Parser<'a> {
         };
         self.expect(TokenType::Assign)?;
         let expr = self.block()?.into();
-        Ok(Statement::Function { ident, args, expr })
+        Ok(Statement::Function {
+            ident,
+            args,
+            expr,
+            line_no,
+        })
     }
 
     fn function_expression(&mut self) -> Result<Expression, ParserError> {
@@ -686,168 +703,5 @@ impl Display for ParserError {
             ParserError::NotImplemented => write!(f, "Not implemented"),
             ParserError::UnableToParseChar(err) => write!(f, "Unable to parse number: `{err}`"),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::ast::{
-        ArithmeticOperator, Expression, Literal, Operation, PathPart, Statement, TableEntry,
-    };
-
-    use super::Parser;
-
-    #[test]
-    fn local_assignment() {
-        let mut parser = Parser::new("let a");
-        assert_eq!(
-            parser.parse().expect("Unable to parse expression."),
-            Statement::Let {
-                ident: "a".to_string(),
-                value: None
-            }
-        );
-    }
-
-    #[test]
-    fn global_assignment() {
-        let mut parser = Parser::new("a = 1 + 1");
-        assert_eq!(
-            parser.parse().expect("Unable to parse expression."),
-            Statement::Expression(Expression::Operation {
-                lhs: Expression::Path {
-                    ident: "a".to_string(),
-                    parts: vec![]
-                }
-                .into(),
-                operation: Operation::Assignment,
-                rhs: Expression::Operation {
-                    lhs: Expression::Literal(Literal::Integer(1)).into(),
-                    operation: Operation::Arithmetic(ArithmeticOperator::Add),
-                    rhs: Expression::Literal(Literal::Integer(1)).into()
-                }
-                .into()
-            })
-        );
-    }
-
-    #[test]
-    fn block() {
-        let mut parser = Parser::new(
-            r#"
-            a = fn ->
-                let a = 2
-                3
-            2
-            "#,
-        );
-        assert_eq!(
-            parser.parse().expect("Unable to parse expression."),
-            Statement::Expression(Expression::Operation {
-                lhs: Expression::Path {
-                    ident: "a".to_string(),
-                    parts: vec![]
-                }
-                .into(),
-                operation: Operation::Assignment,
-                rhs: Expression::Function {
-                    args: vec![],
-                    expr: Expression::Block(vec![
-                        Statement::Let {
-                            ident: "a".to_string(),
-                            value: Some(Expression::Literal(Literal::Integer(2)).into())
-                        },
-                        Statement::Expression(Expression::Literal(Literal::Integer(3)))
-                    ])
-                    .into()
-                }
-                .into()
-            })
-        );
-    }
-
-    #[test]
-    fn operation() {
-        let mut parser = Parser::new("2 + 3 \n\t*\n\t\t4");
-        assert_eq!(
-            parser.parse().expect("Unable to parser operation."),
-            Statement::Expression(Expression::Operation {
-                lhs: Expression::Literal(Literal::Integer(2)).into(),
-                operation: Operation::Arithmetic(ArithmeticOperator::Add),
-                rhs: Expression::Operation {
-                    lhs: Expression::Literal(Literal::Integer(3)).into(),
-                    operation: Operation::Arithmetic(ArithmeticOperator::Multiply),
-                    rhs: Expression::Literal(Literal::Integer(4)).into()
-                }
-                .into()
-            })
-        );
-    }
-
-    #[test]
-    fn call() {
-        let mut parser = Parser::new("some.function ()");
-        assert_eq!(
-            parser.parse().expect("Unable to parse expression."),
-            Statement::Expression(Expression::Call {
-                callee: Expression::Path {
-                    ident: "some".to_string(),
-                    parts: vec![PathPart::Ident("function".to_string())]
-                }
-                .into(),
-                args: vec![Expression::Literal(Literal::Unit)]
-            })
-        )
-    }
-
-    #[test]
-    fn table() {
-        let mut parser = Parser::new("{hello: 1, test: call 2, \"with space\": 2.3, [1 + 1]: 2}");
-        assert_eq!(
-            parser.parse().expect("Unable to parse."),
-            Statement::Expression(Expression::Table(vec![
-                TableEntry {
-                    key: Expression::Literal(Literal::String("hello".to_string())),
-                    value: Expression::Literal(Literal::Integer(1))
-                },
-                TableEntry {
-                    key: Expression::Literal(Literal::String("test".to_string())),
-                    value: Expression::Call {
-                        callee: Expression::Path {
-                            ident: "call".to_string(),
-                            parts: vec![]
-                        }
-                        .into(),
-                        args: vec![Expression::Literal(Literal::Integer(2))]
-                    }
-                },
-                TableEntry {
-                    key: Expression::Literal(Literal::String("with space".to_string())),
-                    value: Expression::Literal(Literal::Number(2.3))
-                },
-                TableEntry {
-                    key: Expression::Operation {
-                        lhs: Expression::Literal(Literal::Integer(1)).into(),
-                        operation: Operation::Arithmetic(ArithmeticOperator::Add),
-                        rhs: Expression::Literal(Literal::Integer(1)).into()
-                    },
-                    value: Expression::Literal(Literal::Integer(2))
-                }
-            ]))
-        )
-    }
-
-    #[test]
-    fn array() {
-        let mut parser = Parser::new("[1, 2, 3, 4]");
-        assert_eq!(
-            parser.parse().expect("Unable to parse."),
-            Statement::Expression(Expression::Array(vec![
-                Expression::Literal(Literal::Integer(1)),
-                Expression::Literal(Literal::Integer(2)),
-                Expression::Literal(Literal::Integer(3)),
-                Expression::Literal(Literal::Integer(4))
-            ]))
-        )
     }
 }

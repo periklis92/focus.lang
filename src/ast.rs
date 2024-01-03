@@ -1,24 +1,30 @@
 #[derive(Debug, PartialEq)]
 pub enum Statement {
     Let {
+        line_no: usize,
         ident: String,
         value: Option<Expression>,
     },
     Function {
+        line_no: usize,
         ident: String,
         args: Vec<String>,
         expr: Expression,
     },
     Import {
+        line_no: usize,
         source: ImportSource,
         imports: Vec<Import>,
     },
-    Expression(Expression),
+    Expression {
+        line_no: usize,
+        expression: Expression,
+    },
 }
 
 impl Statement {
     pub fn is_expression(&self) -> bool {
-        matches!(self, Statement::Expression(_))
+        matches!(self, Statement::Expression { .. })
     }
 }
 

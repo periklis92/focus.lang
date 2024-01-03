@@ -18,6 +18,15 @@ export class ModuleLoader {
 }
 /**
 */
+export class StackTrace {
+  free(): void;
+/**
+* @returns {string}
+*/
+  to_string(): string;
+}
+/**
+*/
 export class Vm {
   free(): void;
 /**
@@ -45,6 +54,11 @@ export class Vm {
 * @param {string} ident
 */
   execute_module(index: number, ident: string): void;
+/**
+* @param {number} depth
+* @returns {StackTrace}
+*/
+  stack_trace(depth: number): StackTrace;
 }
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
@@ -57,12 +71,16 @@ export interface InitOutput {
   readonly vm_new_with_std: () => number;
   readonly vm_load_from_source: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
   readonly vm_execute_module: (a: number, b: number, c: number, d: number, e: number) => void;
+  readonly vm_stack_trace: (a: number, b: number) => number;
   readonly __wbg_moduleloader_free: (a: number) => void;
   readonly moduleloader_new: (a: number, b: number) => number;
   readonly moduleloader_load_module_from_source: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+  readonly __wbg_stacktrace_free: (a: number) => void;
+  readonly stacktrace_to_string: (a: number, b: number) => void;
   readonly __wbindgen_malloc: (a: number, b: number) => number;
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
   readonly __wbindgen_add_to_stack_pointer: (a: number) => number;
+  readonly __wbindgen_free: (a: number, b: number, c: number) => void;
   readonly __wbindgen_exn_store: (a: number) => void;
 }
 

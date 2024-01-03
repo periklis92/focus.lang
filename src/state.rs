@@ -317,8 +317,22 @@ pub enum StackTraceInfo {
     Prototype { ident: String, line: usize },
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 pub struct StackTrace {
-    pub info: Vec<StackTraceInfo>,
+    info: Vec<StackTraceInfo>,
+}
+
+impl StackTrace {
+    pub fn new(trace_info: Vec<StackTraceInfo>) -> Self {
+        Self { info: trace_info }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
+impl StackTrace {
+    pub fn to_string(&self) -> String {
+        ToString::to_string(self)
+    }
 }
 
 impl Display for StackTrace {

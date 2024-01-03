@@ -24,7 +24,7 @@ impl<'a> Lexer<'a> {
             is_new_line: true,
             last_token: Token {
                 position: 0,
-                line: 0,
+                line: 1,
                 column: 0,
                 token_type: TokenType::Eos,
                 span: 0..0,

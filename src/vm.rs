@@ -85,6 +85,24 @@ impl Vm {
         self.execute_prototype(closure, 1)?;
         self.run()
     }
+
+    pub fn stack_trace(&self, depth: usize) -> StackTrace {
+        let mut info = Vec::new();
+        for i in 0..depth.min(self.frames.len() - 1) {
+            let frame = &self.frames[self.frames.len() - 1 - i];
+            let st_info = match &frame.closure.function {
+                Function::Prototype(prototype) => StackTraceInfo::Prototype {
+                    ident: prototype.ident.clone(),
+                    line: prototype.line(frame.ip),
+                },
+                Function::Native(native) => StackTraceInfo::NativeFunction {
+                    ident: native.ident.clone(),
+                },
+            };
+            info.push(st_info);
+        }
+        StackTrace::new(info)
+    }
 }
 
 impl Vm {
@@ -712,24 +730,6 @@ impl Vm {
         self.push(result);
 
         Ok(())
-    }
-
-    pub fn stack_trace(&self, depth: usize) -> StackTrace {
-        let mut info = Vec::new();
-        for i in 0..depth.min(self.frames.len() - 1) {
-            let frame = &self.frames[self.frames.len() - 1 - i];
-            let st_info = match &frame.closure.function {
-                Function::Prototype(prototype) => StackTraceInfo::Prototype {
-                    ident: prototype.ident.clone(),
-                    line: prototype.line(frame.ip),
-                },
-                Function::Native(native) => StackTraceInfo::NativeFunction {
-                    ident: native.ident.clone(),
-                },
-            };
-            info.push(st_info);
-        }
-        StackTrace { info }
     }
 
     pub fn top(&mut self) -> usize {
